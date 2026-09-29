@@ -1,18 +1,16 @@
 # Copyright (c) Microsoft Corporation. All rights reserved.
 # Licensed under the MIT License.
-"""Implementation of tool support over LSP."""
+"""StrictDoc Trace language server."""
+
 from __future__ import annotations
 
-import copy
+import importlib.metadata
 import json
 import os
 import pathlib
-import re
 import sys
-import sysconfig
-import traceback
-import urllib.parse
-from typing import Any, Optional, Sequence
+import tempfile
+import threading
 
 
 # **********************************************************
@@ -33,355 +31,256 @@ update_sys_path(
     os.getenv("LS_IMPORT_STRATEGY", "useBundled"),
 )
 
+# StrictDoc prints to stdout and html2pdf4doc reopens stdout by fd. Keep the
+# real stdout for the LSP protocol and send every other write to stderr.
+REAL_STDOUT = sys.stdout.buffer
+sys.stdout = sys.stderr
+
 # **********************************************************
 # Imports needed for the language server goes below this.
 # **********************************************************
 # pylint: disable=wrong-import-position,import-error
-import lsp_jsonrpc as jsonrpc
-import lsp_utils as utils
 from lsprotocol import types as lsp
-from pygls import uris, workspace
+from packaging.version import Version
+from pygls import uris
 from pygls.lsp.server import LanguageServer
 
-WORKSPACE_SETTINGS = {}
-GLOBAL_SETTINGS = {}
-RUNNER = pathlib.Path(__file__).parent / "lsp_runner.py"
-
-MAX_WORKERS = 5
-NOTEBOOK_SYNC_OPTIONS = lsp.NotebookDocumentSyncOptions(
-    notebook_selector=[
-        lsp.NotebookDocumentFilterWithNotebook(
-            notebook="jupyter-notebook",
-            cells=[lsp.NotebookCellLanguage(language="python")],
-        ),
-        lsp.NotebookDocumentFilterWithNotebook(
-            notebook="interactive",
-            cells=[lsp.NotebookCellLanguage(language="python")],
-        ),
-    ],
-    save=True,
-)
-# TODO: Update the language server name and version.
-LSP_SERVER = server.LanguageServer(
-    name="<pytool-display-name>",
-    version="<server version>",
-    max_workers=MAX_WORKERS,
-    notebook_document_sync=NOTEBOOK_SYNC_OPTIONS,
-)
+MIN_STRICTDOC = "0.30.1"
+INSTALL_HINT = f'uv add "strictdoc>={MIN_STRICTDOC}" (or pip install -U strictdoc)'
 
 
-# **********************************************************
-# Tool specific code goes below this.
-# **********************************************************
-
-# Reference:
-#  LS Protocol:
-#  https://microsoft.github.io/language-server-protocol/specifications/specification-3-16/
-#
-#  Sample implementations:
-#  Pylint: https://github.com/microsoft/vscode-pylint/blob/main/bundled/tool
-#  Black: https://github.com/microsoft/vscode-black-formatter/blob/main/bundled/tool
-#  isort: https://github.com/microsoft/vscode-isort/blob/main/bundled/tool
-
-# TODO: Update TOOL_MODULE with the module name for your tool.
-# e.g, TOOL_MODULE = "pylint"
-TOOL_MODULE = "<pytool-module>"
-
-# TODO: Update TOOL_DISPLAY with a display name for your tool.
-# e.g, TOOL_DISPLAY = "Pylint"
-TOOL_DISPLAY = "<pytool-display-name>"
-
-# TODO: Update TOOL_ARGS with default argument you have to pass to your tool in
-# all scenarios.
-TOOL_ARGS = []  # default arguments always passed to your tool.
-
-
-# TODO: If your tool is a linter then update this section.
-# Delete "Linting features" section if your tool is NOT a linter.
-# **********************************************************
-# Linting features start here
-# **********************************************************
-
-#  See `pylint` implementation for a full featured linter extension:
-#  Pylint: https://github.com/microsoft/vscode-pylint/blob/main/bundled/tool
-
-
-@LSP_SERVER.feature(lsp.TEXT_DOCUMENT_DID_OPEN)
-def did_open(params: lsp.DidOpenTextDocumentParams) -> None:
-    """LSP handler for textDocument/didOpen request."""
-    document = LSP_SERVER.workspace.get_text_document(params.text_document.uri)
-    diagnostics: list[lsp.Diagnostic] = _linting_helper(document)
-    LSP_SERVER.text_document_publish_diagnostics(
-        lsp.PublishDiagnosticsParams(uri=document.uri, diagnostics=diagnostics)
-    )
-
-
-@LSP_SERVER.feature(lsp.TEXT_DOCUMENT_DID_SAVE)
-def did_save(params: lsp.DidSaveTextDocumentParams) -> None:
-    """LSP handler for textDocument/didSave request."""
-    document = LSP_SERVER.workspace.get_text_document(params.text_document.uri)
-    diagnostics: list[lsp.Diagnostic] = _linting_helper(document)
-    LSP_SERVER.text_document_publish_diagnostics(
-        lsp.PublishDiagnosticsParams(uri=document.uri, diagnostics=diagnostics)
-    )
-
-
-@LSP_SERVER.feature(lsp.TEXT_DOCUMENT_DID_CLOSE)
-def did_close(params: lsp.DidCloseTextDocumentParams) -> None:
-    """LSP handler for textDocument/didClose request."""
-    document = LSP_SERVER.workspace.get_text_document(params.text_document.uri)
-    # Publishing empty diagnostics to clear the entries for this file.
-    LSP_SERVER.text_document_publish_diagnostics(
-        lsp.PublishDiagnosticsParams(uri=document.uri, diagnostics=[])
-    )
-
-
-@LSP_SERVER.feature(lsp.NOTEBOOK_DOCUMENT_DID_OPEN)
-def notebook_did_open(params: lsp.DidOpenNotebookDocumentParams) -> None:
-    """LSP handler for notebookDocument/didOpen request."""
-    nb = LSP_SERVER.workspace.get_notebook_document(
-        notebook_uri=params.notebook_document.uri
-    )
-    if nb is None:
-        return
-    for cell in nb.cells:
-        if cell.kind != lsp.NotebookCellKind.Code or cell.document is None:
-            continue
-        document = LSP_SERVER.workspace.get_text_document(cell.document)
-        diagnostics: list[lsp.Diagnostic] = _linting_helper(document)
-        LSP_SERVER.text_document_publish_diagnostics(
-            lsp.PublishDiagnosticsParams(uri=document.uri, diagnostics=diagnostics)
-        )
-
-
-@LSP_SERVER.feature(lsp.NOTEBOOK_DOCUMENT_DID_CHANGE)
-def notebook_did_change(params: lsp.DidChangeNotebookDocumentParams) -> None:
-    """LSP handler for notebookDocument/didChange request."""
-    nb = LSP_SERVER.workspace.get_notebook_document(
-        notebook_uri=params.notebook_document.uri
-    )
-    if nb is None:
-        return
-
-    change = params.change
-    # Re-lint cells whose text content changed.
-    if change.cells and change.cells.text_content:
-        for text_change in change.cells.text_content:
-            document = LSP_SERVER.workspace.get_text_document(
-                text_change.document.uri
-            )
-            diagnostics: list[lsp.Diagnostic] = _linting_helper(document)
-            LSP_SERVER.text_document_publish_diagnostics(
-                lsp.PublishDiagnosticsParams(uri=document.uri, diagnostics=diagnostics)
-            )
-
-    # Lint newly added cells (code cells only).
-    if change.cells and change.cells.structure and change.cells.structure.did_open:
-        code_cell_uris = {
-            cell.document
-            for cell in nb.cells
-            if cell.kind == lsp.NotebookCellKind.Code and cell.document is not None
-        }
-        for cell_doc in change.cells.structure.did_open:
-            if cell_doc.uri not in code_cell_uris:
-                continue
-            document = LSP_SERVER.workspace.get_text_document(cell_doc.uri)
-            diagnostics = _linting_helper(document)
-            LSP_SERVER.text_document_publish_diagnostics(
-                lsp.PublishDiagnosticsParams(uri=document.uri, diagnostics=diagnostics)
-            )
-
-    # Clear diagnostics for removed cells.
-    if change.cells and change.cells.structure and change.cells.structure.did_close:
-        for cell_doc in change.cells.structure.did_close:
-            LSP_SERVER.text_document_publish_diagnostics(
-                lsp.PublishDiagnosticsParams(uri=cell_doc.uri, diagnostics=[])
-            )
-
-
-@LSP_SERVER.feature(lsp.NOTEBOOK_DOCUMENT_DID_SAVE)
-def notebook_did_save(params: lsp.DidSaveNotebookDocumentParams) -> None:
-    """LSP handler for notebookDocument/didSave request."""
-    nb = LSP_SERVER.workspace.get_notebook_document(
-        notebook_uri=params.notebook_document.uri
-    )
-    if nb is None:
-        return
-    for cell in nb.cells:
-        if cell.kind != lsp.NotebookCellKind.Code or cell.document is None:
-            continue
-        document = LSP_SERVER.workspace.get_text_document(cell.document)
-        diagnostics: list[lsp.Diagnostic] = _linting_helper(document)
-        LSP_SERVER.text_document_publish_diagnostics(
-            lsp.PublishDiagnosticsParams(uri=document.uri, diagnostics=diagnostics)
-        )
-
-
-@LSP_SERVER.feature(lsp.NOTEBOOK_DOCUMENT_DID_CLOSE)
-def notebook_did_close(params: lsp.DidCloseNotebookDocumentParams) -> None:
-    """LSP handler for notebookDocument/didClose request."""
-    for cell_doc in params.cell_text_documents:
-        LSP_SERVER.text_document_publish_diagnostics(
-            lsp.PublishDiagnosticsParams(uri=cell_doc.uri, diagnostics=[])
-        )
-
-
-def _get_document_path(document: workspace.Document) -> str:
-    """Returns the file path for a document, handling notebook cell URIs.
-
-    Examples:
-        file:///path/to/file.py -> /path/to/file.py
-        vscode-notebook-cell:/path/to/notebook.ipynb#C00001 -> /path/to/notebook.ipynb
-    """
-    parsed = urllib.parse.urlparse(document.uri)
-    if parsed.scheme == "vscode-notebook-cell":
-        file_uri = urllib.parse.urlunparse(
-            ("file", parsed.netloc, parsed.path, parsed.params, parsed.query, "")
-        )
-        return uris.to_fs_path(file_uri)
-    return uris.to_fs_path(document.uri)
-
-
-def _linting_helper(document: workspace.Document) -> list[lsp.Diagnostic]:
-    # TODO: Determine if your tool supports passing file content via stdin.
-    # If you want to support linting on change then your tool will need to
-    # support linting over stdin to be effective. Read, and update
-    # _run_tool_on_document and _run_tool functions as needed for your project.
-    result = _run_tool_on_document(document)
-    return _parse_output_using_regex(result.stdout) if result.stdout else []
-
-
-# TODO: If your linter outputs in a known format like JSON, then parse
-# accordingly. But incase you need to parse the output using RegEx here
-# is a helper you can work with.
-# flake8 example:
-# If you use following format argument with flake8 you can use the regex below to parse it.
-# TOOL_ARGS += ["--format='%(row)d,%(col)d,%(code).1s,%(code)s:%(text)s'"]
-# DIAGNOSTIC_RE =
-#    r"(?P<line>\d+),(?P<column>-?\d+),(?P<type>\w+),(?P<code>\w+\d+):(?P<message>[^\r\n]*)"
-DIAGNOSTIC_RE = re.compile(r"")
-
-
-def _parse_output_using_regex(content: str) -> list[lsp.Diagnostic]:
-    lines: list[str] = content.splitlines()
-    diagnostics: list[lsp.Diagnostic] = []
-
-    # TODO: Determine if your linter reports line numbers starting at 1 (True) or 0 (False).
-    line_at_1 = True
-    # TODO: Determine if your linter reports column numbers starting at 1 (True) or 0 (False).
-    column_at_1 = True
-
-    line_offset = 1 if line_at_1 else 0
-    col_offset = 1 if column_at_1 else 0
-    for line in lines:
-        if line.startswith("'") and line.endswith("'"):
-            line = line[1:-1]
-        match = DIAGNOSTIC_RE.match(line)
-        if match:
-            data = match.groupdict()
-            position = lsp.Position(
-                line=max([int(data["line"]) - line_offset, 0]),
-                character=int(data["column"]) - col_offset,
-            )
-            diagnostic = lsp.Diagnostic(
-                range=lsp.Range(
-                    start=position,
-                    end=position,
-                ),
-                message=data.get("message"),
-                severity=_get_severity(data["code"], data["type"]),
-                code=data["code"],
-                source=TOOL_MODULE,
-            )
-            diagnostics.append(diagnostic)
-
-    return diagnostics
-
-
-# TODO: if you want to handle setting specific severity for your linter
-# in a user configurable way, then look at look at how it is implemented
-# for `pylint` extension from our team.
-# Pylint: https://github.com/microsoft/vscode-pylint
-# Follow the flow of severity from the settings in package.json to the server.
-def _get_severity(*_codes: list[str]) -> lsp.DiagnosticSeverity:
-    # TODO: All reported issues from linter are treated as warning.
-    # change it as appropriate for your linter.
-    return lsp.DiagnosticSeverity.Warning
-
-
-# **********************************************************
-# Linting features end here
-# **********************************************************
-
-# TODO: If your tool is a formatter then update this section.
-# Delete "Formatting features" section if your tool is NOT a
-# formatter.
-# **********************************************************
-# Formatting features start here
-# **********************************************************
-#  Sample implementations:
-#  Black: https://github.com/microsoft/vscode-black-formatter/blob/main/bundled/tool
-
-
-@LSP_SERVER.feature(lsp.TEXT_DOCUMENT_FORMATTING)
-def formatting(params: lsp.DocumentFormattingParams) -> list[lsp.TextEdit] | None:
-    """LSP handler for textDocument/formatting request."""
-    # If your tool is a formatter you can use this handler to provide
-    # formatting support on save. You have to return an array of lsp.TextEdit
-    # objects, to provide your formatted results.
-
-    document = LSP_SERVER.workspace.get_text_document(params.text_document.uri)
-    edits = _formatting_helper(document)
-    if edits:
-        return edits
-
-    # NOTE: If you provide [] array, VS Code will clear the file of all contents.
-    # To indicate no changes to file return None.
-    return None
-
-
-def _formatting_helper(document: workspace.TextDocument) -> list[lsp.TextEdit] | None:
-    # TODO: For formatting on save support the formatter you use must support
-    # formatting via stdin.
-    # Read, and update_run_tool_on_document and _run_tool functions as needed
-    # for your formatter.
-    result = _run_tool_on_document(document, use_stdin=True)
-    if result.stdout:
-        new_source = _match_line_endings(document, result.stdout)
-        return [
-            lsp.TextEdit(
-                range=lsp.Range(
-                    start=lsp.Position(line=0, character=0),
-                    end=lsp.Position(line=len(document.lines), character=0),
-                ),
-                new_text=new_source,
-            )
-        ]
-    return None
-
-
-def _get_line_endings(lines: list[str]) -> str:
-    """Returns line endings used in the text."""
+def _check_strictdoc() -> str | None:
+    """Return an error message if strictdoc is missing or too old."""
     try:
-        if lines[0][-2:] == "\r\n":
-            return "\r\n"
-        return "\n"
-    except Exception:  # pylint: disable=broad-except
+        version = importlib.metadata.version("strictdoc")
+    except importlib.metadata.PackageNotFoundError:
+        return f"strictdoc is not installed in the selected interpreter: {INSTALL_HINT}"
+    if Version(version) < Version(MIN_STRICTDOC):
+        return (
+            f"strictdoc {version} is too old (need >= {MIN_STRICTDOC}): {INSTALL_HINT}"
+        )
+    return None
+
+
+STRICTDOC_ERROR = _check_strictdoc()
+if STRICTDOC_ERROR is None:
+    # trace_model imports html2pdf4doc, which reopens sys.stdout by fd: it
+    # must happen after the redirection above.
+    import trace_features
+    import trace_model
+
+WORKSPACE_SETTINGS = {}
+CACHE_DIR = os.path.join(tempfile.gettempdir(), "strictdoc-trace")
+
+MODEL = None  # last good trace_model.TraceModel
+PUBLISHED_URIS: set[str] = set()
+BUILD_LOCK = threading.Lock()
+BUILD_TIMER: threading.Timer | None = None
+DEBOUNCE_SECONDS = 0.5
+
+LSP_SERVER = LanguageServer(name="StrictDoc Trace", version="0.1.0", max_workers=5)
+
+
+# **********************************************************
+# Index building.
+# **********************************************************
+def schedule_build(delay: float = DEBOUNCE_SECONDS) -> None:
+    """Rebuild the index in a thread after `delay` seconds, restarting the timer."""
+    global BUILD_TIMER  # pylint: disable=global-statement
+    if BUILD_TIMER is not None:
+        BUILD_TIMER.cancel()
+    BUILD_TIMER = threading.Timer(delay, build)
+    BUILD_TIMER.daemon = True
+    BUILD_TIMER.start()
+
+
+def build() -> tuple[bool, int]:
+    """Rebuild the index, publish diagnostics and notify the client.
+
+    Returns (ok, error_count). On failure the last good model is kept.
+    """
+    global MODEL  # pylint: disable=global-statement
+    if STRICTDOC_ERROR:
+        log_error(STRICTDOC_ERROR)
+        return False, 1
+
+    with BUILD_LOCK:
+        project_dir = _get_project_dir()
+        log_to_output(f"Building StrictDoc index for {project_dir}")
+        # build_model captures strictdoc output and turns failures into errors.
+        model, errors = trace_model.build_model(project_dir, CACHE_DIR)
+        for error in errors:
+            log_to_output(f"{error.path}:{error.line + 1}: {error.message}")
+        if model is not None:
+            MODEL = model
+        _publish_diagnostics(trace_features.diagnostics(MODEL, errors))
+        LSP_SERVER.protocol.notify(
+            "strictdoc/indexUpdated",
+            {
+                "requirementCount": len(MODEL.requirements) if MODEL else 0,
+                "errorCount": len(errors),
+            },
+        )
+        return model is not None, len(errors)
+
+
+def _publish_diagnostics(by_path: dict) -> None:
+    """Publish diagnostics per file and clear files that no longer have any."""
+    uris_now = {uris.from_fs_path(path): diags for path, diags in by_path.items()}
+    for uri in PUBLISHED_URIS - uris_now.keys():
+        uris_now[uri] = []
+    for uri, diags in uris_now.items():
+        LSP_SERVER.text_document_publish_diagnostics(
+            lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diags)
+        )
+    PUBLISHED_URIS.clear()
+    PUBLISHED_URIS.update(uri for uri, diags in uris_now.items() if diags)
+
+
+# **********************************************************
+# Document sync: rebuild on save or on watched file changes.
+# **********************************************************
+@LSP_SERVER.feature(lsp.TEXT_DOCUMENT_DID_SAVE)
+def did_save(_params: lsp.DidSaveTextDocumentParams) -> None:
+    """LSP handler for textDocument/didSave request."""
+    schedule_build()
+
+
+@LSP_SERVER.feature(lsp.WORKSPACE_DID_CHANGE_WATCHED_FILES)
+def did_change_watched_files(_params: lsp.DidChangeWatchedFilesParams) -> None:
+    """LSP handler for workspace/didChangeWatchedFiles notification."""
+    schedule_build()
+
+
+# **********************************************************
+# Language features, delegated to trace_features.
+# **********************************************************
+def _document(uri: str) -> tuple[str, str]:
+    """Return (path, text) for a document uri."""
+    return uris.to_fs_path(uri), LSP_SERVER.workspace.get_text_document(uri).source
+
+
+def _at_position(func, params):
+    """Call a trace_features function taking (model, path, text, line, character)."""
+    if MODEL is None:
         return None
+    path, text = _document(params.text_document.uri)
+    pos = params.position
+    return func(MODEL, path, text, pos.line, pos.character)
 
 
-def _match_line_endings(document: workspace.TextDocument, text: str) -> str:
-    """Ensures that the edited text line endings matches the document line endings."""
-    expected = _get_line_endings(document.source.splitlines(keepends=True))
-    actual = _get_line_endings(text.splitlines(keepends=True))
-    if actual == expected or actual is None or expected is None:
-        return text
-    return text.replace(actual, expected)
+def _in_document(func, params):
+    """Call a trace_features function taking (model, path, text)."""
+    if MODEL is None:
+        return None
+    return func(MODEL, *_document(params.text_document.uri))
+
+
+@LSP_SERVER.feature(lsp.TEXT_DOCUMENT_HOVER)
+def hover(params: lsp.HoverParams) -> lsp.Hover | None:
+    """LSP handler for textDocument/hover request."""
+    return _at_position(trace_features.hover, params)
+
+
+@LSP_SERVER.feature(lsp.TEXT_DOCUMENT_DEFINITION)
+def definition(params: lsp.DefinitionParams):
+    """LSP handler for textDocument/definition request."""
+    return _at_position(trace_features.definition, params)
+
+
+@LSP_SERVER.feature(lsp.TEXT_DOCUMENT_REFERENCES)
+def references(params: lsp.ReferenceParams):
+    """LSP handler for textDocument/references request."""
+    return _at_position(trace_features.references, params)
+
+
+@LSP_SERVER.feature(
+    lsp.TEXT_DOCUMENT_COMPLETION,
+    lsp.CompletionOptions(trigger_characters=["(", ",", " "]),
+)
+def completion(params: lsp.CompletionParams):
+    """LSP handler for textDocument/completion request."""
+    return _at_position(trace_features.completions, params)
+
+
+@LSP_SERVER.feature(lsp.TEXT_DOCUMENT_CODE_LENS)
+def code_lens(params: lsp.CodeLensParams):
+    """LSP handler for textDocument/codeLens request."""
+    return _in_document(trace_features.code_lenses, params)
+
+
+@LSP_SERVER.feature(lsp.TEXT_DOCUMENT_DOCUMENT_LINK)
+def document_link(params: lsp.DocumentLinkParams):
+    """LSP handler for textDocument/documentLink request."""
+    return _in_document(trace_features.document_links, params)
 
 
 # **********************************************************
-# Formatting features ends here
+# Custom requests. Params arrive as namedtuples (or None).
 # **********************************************************
+def _param(params, name: str, default=None):
+    return getattr(params, name, default) if params is not None else default
+
+
+def _uri_to_path(uri: str | None) -> str | None:
+    return uris.to_fs_path(uri) if uri else None
+
+
+@LSP_SERVER.feature("strictdoc/requirements")
+def requirements(_params=None) -> dict:
+    """Return the requirements tree: {docs: [...]}."""
+    if MODEL is None:
+        return {"docs": []}
+    return trace_features.requirements_tree(MODEL)
+
+
+@LSP_SERVER.feature("strictdoc/roots")
+def roots(_params=None) -> dict:
+    """Return the top-level requirements: {nodes: [...]}."""
+    if MODEL is None:
+        return {"nodes": []}
+    return trace_features.roots(MODEL)
+
+
+@LSP_SERVER.feature("strictdoc/coverage")
+def coverage(params=None) -> dict:
+    """Requirements coverage: project, top-level requirements, optional focus uid."""
+    if MODEL is None:
+        return {"project": None, "roots": [], "focus": None}
+    return trace_features.coverage(MODEL, _param(params, "uid"))
+
+
+@LSP_SERVER.feature("strictdoc/graph")
+def graph(params=None) -> dict:
+    """Return the lineage subgraph around a uid or a document position."""
+    if MODEL is None:
+        return {"focus": [], "nodes": [], "edges": [], "code": []}
+    return trace_features.graph(
+        MODEL,
+        _param(params, "uid"),
+        _uri_to_path(_param(params, "uri")),
+        _param(params, "line"),
+        _param(params, "up", 1),
+        _param(params, "down", 1),
+        _param(params, "includeCode", False),
+    )
+
+
+@LSP_SERVER.feature("strictdoc/locate")
+def locate(params=None) -> dict:
+    """Return the requirements covering a code line, or the code of an .sdoc line."""
+    path = _uri_to_path(_param(params, "uri"))
+    if MODEL is None or path is None:
+        return {"requirements": [], "code": []}
+    return trace_features.locate(MODEL, path, _param(params, "line", 0))
+
+
+@LSP_SERVER.thread()
+@LSP_SERVER.feature("strictdoc/rebuild")
+def rebuild(_params=None) -> dict:
+    """Rebuild the index now and report the result."""
+    ok, error_count = build()
+    return {"ok": ok, "errorCount": error_count}
 
 
 # **********************************************************
@@ -390,372 +289,43 @@ def _match_line_endings(document: workspace.TextDocument, text: str) -> str:
 @LSP_SERVER.feature(lsp.INITIALIZE)
 def initialize(params: lsp.InitializeParams) -> None:
     """LSP handler for initialize request."""
+    global CACHE_DIR  # pylint: disable=global-statement
     log_to_output(f"CWD Server: {os.getcwd()}")
 
     paths = "\r\n   ".join(sys.path)
     log_to_output(f"sys.path used to run Server:\r\n   {paths}")
 
-    GLOBAL_SETTINGS.update(**params.initialization_options.get("globalSettings", {}))
+    options = params.initialization_options or {}
+    CACHE_DIR = options.get("cacheDir") or CACHE_DIR
 
-    settings = params.initialization_options["settings"]
+    settings = options.get("settings", [])
     _update_workspace_settings(settings)
     log_to_output(
         f"Settings used to run Server:\r\n{json.dumps(settings, indent=4, ensure_ascii=False)}\r\n"
     )
-    log_to_output(
-        f"Global settings:\r\n{json.dumps(GLOBAL_SETTINGS, indent=4, ensure_ascii=False)}\r\n"
-    )
 
 
-@LSP_SERVER.feature(lsp.EXIT)
-def on_exit(_params: Optional[Any] = None) -> None:
-    """Handle clean up on exit."""
-    jsonrpc.shutdown_json_rpc()
-
-
-@LSP_SERVER.feature(lsp.SHUTDOWN)
-def on_shutdown(_params: Optional[Any] = None) -> None:
-    """Handle clean up on shutdown."""
-    jsonrpc.shutdown_json_rpc()
-
-
-def get_cwd(settings: dict, document: Optional[workspace.TextDocument]) -> str:
-    """Returns the working directory for running the tool.
-
-    Resolves the following VS Code file-related variable substitutions when
-    a document is available:
-
-    - ``${file}`` – absolute path of the current document.
-    - ``${fileBasename}`` – file name with extension (e.g. ``foo.py``).
-    - ``${fileBasenameNoExtension}`` – file name without extension (e.g. ``foo``).
-    - ``${fileExtname}`` – file extension including the dot (e.g. ``.py``).
-    - ``${fileDirname}`` – directory containing the current document.
-    - ``${fileDirnameBasename}`` – name of the directory containing the document.
-    - ``${relativeFile}`` – document path relative to the workspace root.
-    - ``${relativeFileDirname}`` – document directory relative to the workspace root.
-    - ``${fileWorkspaceFolder}`` – workspace root folder for the document.
-
-    Variables that do not depend on the document (``${workspaceFolder}``,
-    ``${userHome}``, ``${cwd}``) are pre-resolved by the TypeScript client.
-
-    If no document is available and the value contains any unresolvable
-    file-variable, the workspace root is returned as a fallback.
-
-    See https://code.visualstudio.com/docs/reference/variables-reference
-    """
-    cwd = settings.get("cwd", settings["workspaceFS"])
-
-    workspace_fs = settings["workspaceFS"]
-
-    if document and document.path:
-        file_path = document.path
-        file_dir = os.path.dirname(file_path)
-        file_basename = os.path.basename(file_path)
-        file_stem, file_ext = os.path.splitext(file_basename)
-
-        substitutions = {
-            "${file}": file_path,
-            "${fileBasename}": file_basename,
-            "${fileBasenameNoExtension}": file_stem,
-            "${fileExtname}": file_ext,
-            "${fileDirname}": file_dir,
-            "${fileDirnameBasename}": os.path.basename(file_dir),
-            "${relativeFile}": os.path.relpath(file_path, workspace_fs),
-            "${relativeFileDirname}": os.path.relpath(file_dir, workspace_fs),
-            "${fileWorkspaceFolder}": workspace_fs,
-        }
-
-        for token, value in substitutions.items():
-            cwd = cwd.replace(token, value)
-    else:
-        # Without a document we cannot resolve file-related variables.
-        # Fall back to workspace root if any remain.
-        if "${file" in cwd or "${relativeFile" in cwd:
-            cwd = workspace_fs
-
-    return cwd
-
-
-def _get_global_defaults():
-    return {
-        "path": GLOBAL_SETTINGS.get("path", []),
-        "interpreter": GLOBAL_SETTINGS.get("interpreter", [sys.executable]),
-        "args": GLOBAL_SETTINGS.get("args", []),
-        "importStrategy": GLOBAL_SETTINGS.get("importStrategy", "useBundled"),
-        "showNotifications": GLOBAL_SETTINGS.get("showNotifications", "off"),
-    }
+@LSP_SERVER.feature(lsp.INITIALIZED)
+def initialized(_params: lsp.InitializedParams) -> None:
+    """LSP handler for initialized notification: build the index."""
+    schedule_build(0)
 
 
 def _update_workspace_settings(settings):
     if not settings:
         key = os.getcwd()
-        WORKSPACE_SETTINGS[key] = {
-            "cwd": key,
-            "workspaceFS": key,
-            "workspace": uris.from_fs_path(key),
-            **_get_global_defaults(),
-        }
+        WORKSPACE_SETTINGS[key] = {"workspaceFS": key, "projectPath": key}
         return
 
     for setting in settings:
         key = uris.to_fs_path(setting["workspace"])
-        WORKSPACE_SETTINGS[key] = {
-            "cwd": key,
-            **setting,
-            "workspaceFS": key,
-        }
+        WORKSPACE_SETTINGS[key] = {**setting, "workspaceFS": key}
 
 
-def _get_settings_by_path(file_path: pathlib.Path):
-    workspaces = {s["workspaceFS"] for s in WORKSPACE_SETTINGS.values()}
-
-    while file_path != file_path.parent:
-        str_file_path = str(file_path)
-        if str_file_path in workspaces:
-            return WORKSPACE_SETTINGS[str_file_path]
-        file_path = file_path.parent
-
-    setting_values = list(WORKSPACE_SETTINGS.values())
-    return setting_values[0]
-
-
-def _get_document_key(document: workspace.TextDocument):
-    if WORKSPACE_SETTINGS:
-        document_workspace = pathlib.Path(document.path)
-        workspaces = {s["workspaceFS"] for s in WORKSPACE_SETTINGS.values()}
-
-        # Find workspace settings for the given file.
-        while document_workspace != document_workspace.parent:
-            if str(document_workspace) in workspaces:
-                return str(document_workspace)
-            document_workspace = document_workspace.parent
-
-    return None
-
-
-def _get_settings_by_document(document: workspace.TextDocument | None):
-    if document is None or document.path is None:
-        return list(WORKSPACE_SETTINGS.values())[0]
-
-    key = _get_document_key(document)
-    if key is None:
-        # This is either a non-workspace file or there is no workspace.
-        key = os.fspath(pathlib.Path(document.path).parent)
-        return {
-            "cwd": key,
-            "workspaceFS": key,
-            "workspace": uris.from_fs_path(key),
-            **_get_global_defaults(),
-        }
-
-    return WORKSPACE_SETTINGS[str(key)]
-
-
-# *****************************************************
-# Internal execution APIs.
-# *****************************************************
-def _run_tool_on_document(
-    document: workspace.TextDocument,
-    use_stdin: bool = False,
-    extra_args: Optional[Sequence[str]] = None,
-) -> utils.RunResult | None:
-    """Runs tool on the given document.
-
-    if use_stdin is true then contents of the document is passed to the
-    tool via stdin.
-    """
-    if extra_args is None:
-        extra_args = []
-    # TODO: Notebook cells are now supported via the notebookDocument/ handlers.
-    # If you want to customize notebook cell handling, update the notebook handlers above.
-
-    document_path = _get_document_path(document)
-    if utils.is_stdlib_file(document_path):
-        # TODO: Decide on if you want to skip standard library files.
-        # Skip standard library python files.
-        return None
-
-    # deep copy here to prevent accidentally updating global settings.
-    settings = copy.deepcopy(_get_settings_by_document(document))
-
-    code_workspace = settings["workspaceFS"]
-    # Pass document so get_cwd can resolve file-related variables for this document.
-    cwd = get_cwd(settings, document)
-
-    use_path = False
-    use_rpc = False
-    if settings["path"]:
-        # 'path' setting takes priority over everything.
-        use_path = True
-        argv = settings["path"]
-    elif settings["interpreter"] and not utils.is_current_interpreter(
-        settings["interpreter"][0]
-    ):
-        # If there is a different interpreter set use JSON-RPC to the subprocess
-        # running under that interpreter.
-        argv = [TOOL_MODULE]
-        use_rpc = True
-    else:
-        # if the interpreter is same as the interpreter running this
-        # process then run as module.
-        argv = [TOOL_MODULE]
-
-    argv += TOOL_ARGS + settings["args"] + extra_args
-
-    if use_stdin:
-        # TODO: update these to pass the appropriate arguments to provide document contents
-        # to tool via stdin.
-        # For example, for pylint args for stdin looks like this:
-        #     pylint --from-stdin <path>
-        # Here `--from-stdin` path is used by pylint to make decisions on the file contents
-        # that are being processed. Like, applying exclusion rules.
-        # It should look like this when you pass it:
-        #     argv += ["--from-stdin", document.path]
-        # Read up on how your tool handles contents via stdin. If stdin is not supported use
-        # set use_stdin to False, or provide path, what ever is appropriate for your tool.
-        argv += []
-    else:
-        argv += [document_path]
-
-    if use_path:
-        # This mode is used when running executables.
-        log_to_output(" ".join(argv))
-        log_to_output(f"CWD Server: {cwd}")
-        result = utils.run_path(
-            argv=argv,
-            use_stdin=use_stdin,
-            cwd=cwd,
-            source=document.source.replace("\r\n", "\n"),
-        )
-        if result.stderr:
-            log_to_output(result.stderr)
-    elif use_rpc:
-        # This mode is used if the interpreter running this server is different from
-        # the interpreter used for running this server.
-        log_to_output(" ".join(settings["interpreter"] + ["-m"] + argv))
-        log_to_output(f"CWD Linter: {cwd}")
-
-        result = jsonrpc.run_over_json_rpc(
-            workspace=code_workspace,
-            interpreter=settings["interpreter"],
-            module=TOOL_MODULE,
-            argv=argv,
-            use_stdin=use_stdin,
-            cwd=cwd,
-            source=document.source,
-        )
-        if result.exception:
-            log_error(result.exception)
-            result = utils.RunResult(result.stdout, result.stderr)
-        elif result.stderr:
-            log_to_output(result.stderr)
-    else:
-        # In this mode the tool is run as a module in the same process as the language server.
-        log_to_output(" ".join([sys.executable, "-m"] + argv))
-        log_to_output(f"CWD Linter: {cwd}")
-        # This is needed to preserve sys.path, in cases where the tool modifies
-        # sys.path and that might not work for this scenario next time around.
-        with utils.substitute_attr(sys, "path", sys.path[:]):
-            try:
-                # TODO: `utils.run_module` is equivalent to running `python -m <pytool-module>`.
-                # If your tool supports a programmatic API then replace the function below
-                # with code for your tool. You can also use `utils.run_api` helper, which
-                # handles changing working directories, managing io streams, etc.
-                # Also update `_run_tool` function and `utils.run_module` in `lsp_runner.py`.
-                result = utils.run_module(
-                    module=TOOL_MODULE,
-                    argv=argv,
-                    use_stdin=use_stdin,
-                    cwd=cwd,
-                    source=document.source,
-                )
-            except Exception:
-                log_error(traceback.format_exc(chain=True))
-                raise
-        if result.stderr:
-            log_to_output(result.stderr)
-
-    log_to_output(f"{document.uri} :\r\n{result.stdout}")
-    return result
-
-
-def _run_tool(extra_args: Sequence[str]) -> utils.RunResult:
-    """Runs tool."""
-    # deep copy here to prevent accidentally updating global settings.
-    settings = copy.deepcopy(_get_settings_by_document(None))
-
-    code_workspace = settings["workspaceFS"]
-    cwd = get_cwd(settings, None)
-
-    use_path = False
-    use_rpc = False
-    if len(settings["path"]) > 0:
-        # 'path' setting takes priority over everything.
-        use_path = True
-        argv = settings["path"]
-    elif len(settings["interpreter"]) > 0 and not utils.is_current_interpreter(
-        settings["interpreter"][0]
-    ):
-        # If there is a different interpreter set use JSON-RPC to the subprocess
-        # running under that interpreter.
-        argv = [TOOL_MODULE]
-        use_rpc = True
-    else:
-        # if the interpreter is same as the interpreter running this
-        # process then run as module.
-        argv = [TOOL_MODULE]
-
-    argv += extra_args
-
-    if use_path:
-        # This mode is used when running executables.
-        log_to_output(" ".join(argv))
-        log_to_output(f"CWD Server: {cwd}")
-        result = utils.run_path(argv=argv, use_stdin=True, cwd=cwd)
-        if result.stderr:
-            log_to_output(result.stderr)
-    elif use_rpc:
-        # This mode is used if the interpreter running this server is different from
-        # the interpreter used for running this server.
-        log_to_output(" ".join(settings["interpreter"] + ["-m"] + argv))
-        log_to_output(f"CWD Linter: {cwd}")
-        result = jsonrpc.run_over_json_rpc(
-            workspace=code_workspace,
-            interpreter=settings["interpreter"],
-            module=TOOL_MODULE,
-            argv=argv,
-            use_stdin=True,
-            cwd=cwd,
-        )
-        if result.exception:
-            log_error(result.exception)
-            result = utils.RunResult(result.stdout, result.stderr)
-        elif result.stderr:
-            log_to_output(result.stderr)
-    else:
-        # In this mode the tool is run as a module in the same process as the language server.
-        log_to_output(" ".join([sys.executable, "-m"] + argv))
-        log_to_output(f"CWD Linter: {cwd}")
-        # This is needed to preserve sys.path, in cases where the tool modifies
-        # sys.path and that might not work for this scenario next time around.
-        with utils.substitute_attr(sys, "path", sys.path[:]):
-            try:
-                # TODO: `utils.run_module` is equivalent to running `python -m <pytool-module>`.
-                # If your tool supports a programmatic API then replace the function below
-                # with code for your tool. You can also use `utils.run_api` helper, which
-                # handles changing working directories, managing io streams, etc.
-                # Also update `_run_tool_on_document` function and `utils.run_module` in `lsp_runner.py`.
-                result = utils.run_module(
-                    module=TOOL_MODULE, argv=argv, use_stdin=True, cwd=cwd
-                )
-            except Exception:
-                log_error(traceback.format_exc(chain=True))
-                raise
-        if result.stderr:
-            log_to_output(result.stderr)
-
-    log_to_output(f"\r\n{result.stdout}\r\n")
-    return result
+def _get_project_dir() -> str:
+    """The StrictDoc project of the first workspace (multi-root not supported)."""
+    settings = next(iter(WORKSPACE_SETTINGS.values()))
+    return settings.get("projectPath") or settings["workspaceFS"]
 
 
 # *****************************************************
@@ -777,28 +347,8 @@ def log_error(message: str) -> None:
         )
 
 
-def log_warning(message: str) -> None:
-    LSP_SERVER.window_log_message(
-        lsp.LogMessageParams(type=lsp.MessageType.Warning, message=message)
-    )
-    if os.getenv("LS_SHOW_NOTIFICATION", "off") in ["onWarning", "always"]:
-        LSP_SERVER.window_show_message(
-            lsp.ShowMessageParams(type=lsp.MessageType.Warning, message=message)
-        )
-
-
-def log_always(message: str) -> None:
-    LSP_SERVER.window_log_message(
-        lsp.LogMessageParams(type=lsp.MessageType.Info, message=message)
-    )
-    if os.getenv("LS_SHOW_NOTIFICATION", "off") in ["always"]:
-        LSP_SERVER.window_show_message(
-            lsp.ShowMessageParams(type=lsp.MessageType.Info, message=message)
-        )
-
-
 # *****************************************************
 # Start the server.
 # *****************************************************
 if __name__ == "__main__":
-    LSP_SERVER.start_io()
+    LSP_SERVER.start_io(stdout=REAL_STDOUT)

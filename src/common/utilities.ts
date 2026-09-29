@@ -3,9 +3,9 @@
 
 import * as fs from 'fs-extra';
 import * as path from 'path';
-import { LogLevel, Uri, WorkspaceFolder } from 'vscode';
+import { LogLevel, Uri, window, workspace, WorkspaceFolder } from 'vscode';
 import { Trace } from 'vscode-jsonrpc/node';
-import { getWorkspaceFolders } from './vscodeapi';
+import { getConfiguration, getWorkspaceFolders } from './vscodeapi';
 
 function logLevelToTrace(logLevel: LogLevel): Trace {
     switch (logLevel) {
@@ -35,33 +35,25 @@ export function getLSClientTraceLevel(channelLogLevel: LogLevel, globalLogLevel:
     return level;
 }
 
-export async function getProjectRoot(): Promise<WorkspaceFolder> {
-    const workspaces: readonly WorkspaceFolder[] = getWorkspaceFolders();
-    if (workspaces.length === 0) {
-        return {
-            uri: Uri.file(process.cwd()),
-            name: path.basename(process.cwd()),
-            index: 0,
-        };
-    } else if (workspaces.length === 1) {
-        return workspaces[0];
-    } else {
-        let rootWorkspace = workspaces[0];
-        let root = undefined;
-        for (const w of workspaces) {
-            if (await fs.pathExists(w.uri.fsPath)) {
-                root = w.uri.fsPath;
-                rootWorkspace = w;
-                break;
-            }
-        }
+function isStrictdocProject(folder: WorkspaceFolder): boolean {
+    const projectPath = getConfiguration('strictdoc', folder.uri).inspect<string>('projectPath');
+    return (
+        projectPath?.workspaceFolderValue !== undefined ||
+        ['strictdoc_config.py', 'strictdoc.toml'].some((f) => fs.existsSync(path.join(folder.uri.fsPath, f)))
+    );
+}
 
-        for (const w of workspaces) {
-            if (root && root.length > w.uri.fsPath.length && (await fs.pathExists(w.uri.fsPath))) {
-                root = w.uri.fsPath;
-                rootWorkspace = w;
-            }
-        }
-        return rootWorkspace;
+// The StrictDoc project folder: the active editor's folder if it is one, else the first
+// folder that is one, else the first folder. Multi-root workspaces get one project.
+export async function getProjectRoot(): Promise<WorkspaceFolder> {
+    const workspaces = getWorkspaceFolders();
+    if (workspaces.length === 0) {
+        return { uri: Uri.file(process.cwd()), name: path.basename(process.cwd()), index: 0 };
     }
+    const activeUri = window.activeTextEditor?.document.uri;
+    const active = activeUri && workspace.getWorkspaceFolder(activeUri);
+    if (active && isStrictdocProject(active)) {
+        return active;
+    }
+    return workspaces.find(isStrictdocProject) ?? workspaces[0];
 }

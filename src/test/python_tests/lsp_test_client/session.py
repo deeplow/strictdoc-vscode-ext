@@ -23,6 +23,7 @@ LSP_EXIT_TIMEOUT = 5000
 PUBLISH_DIAGNOSTICS = "textDocument/publishDiagnostics"
 WINDOW_LOG_MESSAGE = "window/logMessage"
 WINDOW_SHOW_MESSAGE = "window/showMessage"
+INDEX_UPDATED = "strictdoc/indexUpdated"
 
 
 # pylint: disable=too-many-instance-attributes
@@ -58,13 +59,16 @@ class LspSession(MethodDispatcher):
             shell="WITH_COVERAGE" in os.environ,
         )
 
-        self._writer = JsonRpcStreamWriter(os.fdopen(self._sub.stdin.fileno(), "wb"))
-        self._reader = JsonRpcStreamReader(os.fdopen(self._sub.stdout.fileno(), "rb"))
+        self._writer = JsonRpcStreamWriter(self._sub.stdin)
+        self._reader = JsonRpcStreamReader(self._sub.stdout)
 
         dispatcher = {
             PUBLISH_DIAGNOSTICS: self._publish_diagnostics,
             WINDOW_SHOW_MESSAGE: self._window_show_message,
             WINDOW_LOG_MESSAGE: self._window_log_message,
+            INDEX_UPDATED: lambda params: self._handle_notification(
+                INDEX_UPDATED, params
+            ),
         }
         self._endpoint = Endpoint(dispatcher, self._writer.write)
         self._thread_pool.submit(self._reader.listen, self._endpoint.consume)
@@ -141,38 +145,18 @@ class LspSession(MethodDispatcher):
         """Sends did close notification to LSP Server."""
         self._send_notification("textDocument/didClose", params=did_close_params)
 
-    def notify_notebook_did_open(self, params):
-        """Sends notebookDocument/didOpen notification to LSP Server."""
-        self._send_notification("notebookDocument/didOpen", params=params)
+    def text_document_hover(self, hover_params):
+        """Sends text document hover request to LSP server."""
+        return self._send_request("textDocument/hover", params=hover_params).result()
 
-    def notify_notebook_did_change(self, params):
-        """Sends notebookDocument/didChange notification to LSP Server."""
-        self._send_notification("notebookDocument/didChange", params=params)
-
-    def notify_notebook_did_save(self, params):
-        """Sends notebookDocument/didSave notification to LSP Server."""
-        self._send_notification("notebookDocument/didSave", params=params)
-
-    def notify_notebook_did_close(self, params):
-        """Sends notebookDocument/didClose notification to LSP Server."""
-        self._send_notification("notebookDocument/didClose", params=params)
-
-    def text_document_formatting(self, formatting_params):
-        """Sends text document references request to LSP server."""
-        fut = self._send_request("textDocument/formatting", params=formatting_params)
+    def text_document_definition(self, definition_params):
+        """Sends text document definition request to LSP server."""
+        fut = self._send_request("textDocument/definition", params=definition_params)
         return fut.result()
 
-    def text_document_code_action(self, code_action_params):
-        """Sends text document code actions request to LSP server."""
-        fut = self._send_request("textDocument/codeAction", params=code_action_params)
-        return fut.result()
-
-    def code_action_resolve(self, code_action_resolve_params):
-        """Sends text document code actions resolve request to LSP server."""
-        fut = self._send_request(
-            "codeAction/resolve", params=code_action_resolve_params
-        )
-        return fut.result()
+    def request(self, name, params=None):
+        """Sends a custom request to LSP server and returns its result."""
+        return self._send_request(name, params=params).result()
 
     def set_notification_callback(self, notification_name, callback):
         """Set custom LS notification handler."""

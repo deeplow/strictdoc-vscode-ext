@@ -1,14 +1,11 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-/* eslint-disable @typescript-eslint/explicit-module-boundary-types */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import {
     commands,
     ConfigurationScope,
     Disposable,
     LogOutputChannel,
-    Uri,
     window,
     workspace,
     WorkspaceConfiguration,
@@ -29,15 +26,6 @@ export function registerCommand(command: string, callback: (...args: any[]) => a
 
 export const { onDidChangeConfiguration } = workspace;
 
-export function isVirtualWorkspace(): boolean {
-    const isVirtual = workspace.workspaceFolders && workspace.workspaceFolders.every((f) => f.uri.scheme !== 'file');
-    return !!isVirtual;
-}
-
 export function getWorkspaceFolders(): readonly WorkspaceFolder[] {
     return workspace.workspaceFolders ?? [];
-}
-
-export function getWorkspaceFolder(uri: Uri): WorkspaceFolder | undefined {
-    return workspace.getWorkspaceFolder(uri);
 }

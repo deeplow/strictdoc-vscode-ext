@@ -1,0 +1,18 @@
+[project]
+name = "strictdoc-trace"
+version = "0.1.0"
+requires-python = ">=3.10"
+
+[dependency-groups]
+bundled = ["pygls>=2", "packaging"]
+dev = [
+    "strictdoc>=0.30.1",
+    "pytest",
+    "PyHamcrest",
+    "python-jsonrpc-server",
+    { include-group = "bundled" },
+]
+
+[tool.uv]
+package = false
+default-groups = ["dev"]

@@ -1,3 +1,7 @@
 # Change Log
 
--   Release information can be added here or can be tracked via github release.
+## Unreleased
+
+- First version: Trace Graph and Requirements views, hover, definition,
+  references, CodeLens, diagnostics and navigation commands for StrictDoc
+  projects.

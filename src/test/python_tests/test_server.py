@@ -1,138 +1,68 @@
 # Copyright (c) Microsoft Corporation. All rights reserved.
 # Licensed under the MIT License.
 """
-Test for linting over LSP.
+LSP round trip against the sample StrictDoc project.
+
+StrictDoc prints to stdout, so any response arriving here also proves that
+the protocol stream is not corrupted.
 """
 
 from threading import Event
 
-from hamcrest import assert_that, is_
+from hamcrest import assert_that, contains_string, ends_with, has_item, is_
 
-from .lsp_test_client import constants, defaults, session, utils
+from .lsp_test_client import defaults, session, utils
 
-TEST_FILE_PATH = constants.TEST_DATA / "sample1" / "sample.py"
-TEST_FILE_URI = utils.as_uri(str(TEST_FILE_PATH))
-SERVER_INFO = utils.get_server_info_defaults()
-TIMEOUT = 10  # 10 seconds
+PROJECT = defaults.TEST_PROJECT
+APP_PATH = PROJECT / "src" / "app.py"
+APP_URI = utils.as_uri(str(APP_PATH))
+TIMEOUT = 60  # a cold StrictDoc build can take a while
 
 
-def test_linting_example():
-    """Test to linting on file open."""
-    contents = TEST_FILE_PATH.read_text()
+def _marker_position():
+    """Position of REQ-1 in the function-scope marker of app.py."""
+    lines = APP_PATH.read_text(encoding="utf-8").splitlines()
+    line = next(i for i, text in enumerate(lines) if "scope=function" in text)
+    return {"line": line, "character": lines[line].index("REQ-1") + 1}
 
-    actual = []
+
+def _single_location(result):
+    """Definition may be a Location, a list of them or LocationLinks."""
+    location = result[0] if isinstance(result, list) else result
+    return location.get("uri") or location.get("targetUri")
+
+
+def test_round_trip():
+    """Build the index, then hover and go to definition on a marker."""
+    params = {"textDocument": {"uri": APP_URI}, "position": _marker_position()}
+
     with session.LspSession() as ls_session:
+        index_updated = Event()
+        updates = []
+
+        def _on_index_updated(update):
+            updates.append(update)
+            index_updated.set()
+
+        ls_session.set_notification_callback(session.INDEX_UPDATED, _on_index_updated)
         ls_session.initialize(defaults.VSCODE_DEFAULT_INITIALIZE)
+        assert_that(index_updated.wait(TIMEOUT), is_(True))
+        assert_that(updates[0]["errorCount"], is_(0))
 
-        done = Event()
+        hover = ls_session.text_document_hover(params)
+        assert_that(str(hover["contents"]), contains_string("System shall do X"))
 
-        def _handler(params):
-            nonlocal actual
-            actual = params
-            done.set()
+        definition = ls_session.text_document_definition(params)
+        assert_that(_single_location(definition), ends_with("reqs.sdoc"))
 
-        ls_session.set_notification_callback(session.PUBLISH_DIAGNOSTICS, _handler)
-
-        ls_session.notify_did_open(
-            {
-                "textDocument": {
-                    "uri": TEST_FILE_URI,
-                    "languageId": "python",
-                    "version": 1,
-                    "text": contents,
-                }
-            }
+        helper_line = (
+            APP_PATH.read_text(encoding="utf-8").splitlines().index("    return 41")
         )
+        located = ls_session.request(
+            "strictdoc/locate", {"uri": APP_URI, "line": helper_line}
+        )
+        uids = [req["uid"] for req in located["requirements"]]
+        assert_that(uids, has_item("REQ-2"))
 
-        # wait for some time to receive all notifications
-        done.wait(TIMEOUT)
-
-        # TODO: Add your linter specific diagnostic result here
-        expected = {
-            "uri": TEST_FILE_URI,
-            "diagnostics": [
-                {
-                    # "range": {
-                    #     "start": {"line": 0, "character": 0},
-                    #     "end": {"line": 0, "character": 0},
-                    # },
-                    # "message": "Missing module docstring",
-                    # "severity": 3,
-                    # "code": "C0114:missing-module-docstring",
-                    "source": SERVER_INFO["name"],
-                },
-                {
-                    # "range": {
-                    #     "start": {"line": 2, "character": 6},
-                    #     "end": {
-                    #         "line": 2,
-                    #         "character": 7,
-                    #     },
-                    # },
-                    # "message": "Undefined variable 'x'",
-                    # "severity": 1,
-                    # "code": "E0602:undefined-variable",
-                    "source": SERVER_INFO["name"],
-                },
-                {
-                    # "range": {
-                    #     "start": {"line": 0, "character": 0},
-                    #     "end": {
-                    #         "line": 0,
-                    #         "character": 10,
-                    #     },
-                    # },
-                    # "message": "Unused import sys",
-                    # "severity": 2,
-                    # "code": "W0611:unused-import",
-                    "source": SERVER_INFO["name"],
-                },
-            ],
-        }
-
-    assert_that(actual, is_(expected))
-
-
-def test_formatting_example():
-    """Test formatting a python file."""
-    FORMATTED_TEST_FILE_PATH = constants.TEST_DATA / "sample1" / "sample.py"
-    UNFORMATTED_TEST_FILE_PATH = constants.TEST_DATA / "sample1" / "sample.unformatted"
-
-    contents = UNFORMATTED_TEST_FILE_PATH.read_text()
-    lines = contents.splitlines(keepends=False)
-
-    actual = []
-    with utils.PythonFile(contents, UNFORMATTED_TEST_FILE_PATH.parent) as pf:
-        uri = utils.as_uri(str(pf.fullpath))
-
-        with session.LspSession() as ls_session:
-            ls_session.initialize()
-            ls_session.notify_did_open(
-                {
-                    "textDocument": {
-                        "uri": uri,
-                        "languageId": "python",
-                        "version": 1,
-                        "text": contents,
-                    }
-                }
-            )
-            actual = ls_session.text_document_formatting(
-                {
-                    "textDocument": {"uri": uri},
-                    # `options` is not used by black
-                    "options": {"tabSize": 4, "insertSpaces": True},
-                }
-            )
-
-    expected = [
-        {
-            "range": {
-                "start": {"line": 0, "character": 0},
-                "end": {"line": len(lines), "character": 0},
-            },
-            "newText": FORMATTED_TEST_FILE_PATH.read_text(),
-        }
-    ]
-
-    assert_that(actual, is_(expected))
+        rebuilt = ls_session.request("strictdoc/rebuild", {})
+        assert_that(rebuilt, is_({"ok": True, "errorCount": 0}))

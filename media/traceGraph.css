@@ -1,0 +1,421 @@
+body {
+    padding: 0;
+    color: var(--vscode-foreground);
+    background: var(--vscode-sideBar-background);
+    font-family: var(--vscode-font-family);
+    font-size: var(--vscode-font-size);
+}
+
+button {
+    border: none;
+    border-radius: 3px;
+    padding: 0 5px;
+    color: var(--vscode-foreground);
+    background: transparent;
+    font: inherit;
+    cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+    background: var(--vscode-toolbar-hoverBackground);
+}
+
+button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+button.on {
+    color: var(--vscode-inputOption-activeForeground);
+    background: var(--vscode-inputOption-activeBackground);
+}
+
+.header,
+.toolbar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+}
+
+.header input {
+    flex: 1;
+    min-width: 0;
+    padding: 3px 6px;
+    color: var(--vscode-input-foreground);
+    background: var(--vscode-input-background);
+    border: 1px solid var(--vscode-input-border, transparent);
+    border-radius: 2px;
+    font: inherit;
+}
+
+.header input:focus {
+    outline: 1px solid var(--vscode-focusBorder);
+}
+
+.toolbar {
+    flex-wrap: wrap;
+    padding-top: 0;
+    color: var(--vscode-descriptionForeground);
+}
+
+.status {
+    padding: 6px 8px;
+    color: var(--vscode-descriptionForeground);
+}
+
+/* Small heading above a group of rows. */
+.section {
+    padding: 6px 8px 2px;
+    font-size: 0.85em;
+    font-weight: 600;
+    color: var(--vscode-descriptionForeground);
+    white-space: nowrap;
+}
+
+.row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 22px;
+    padding: 0 6px 0 0;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.row:hover {
+    background: var(--vscode-list-hoverBackground);
+}
+
+.row.code,
+.row.test {
+    color: var(--vscode-descriptionForeground);
+}
+
+/* Layer colour stripe at the left edge of every row; colour set via CSSOM. */
+.stripe {
+    flex: none;
+    align-self: stretch;
+    width: 3px;
+    margin-right: 2px;
+}
+
+/* Fixed-width slot for the relation marker (↑ ↓). */
+.marker {
+    flex: none;
+    width: 1.2em;
+    text-align: center;
+    color: var(--vscode-descriptionForeground);
+}
+
+.icon {
+    flex: none;
+    opacity: 0.8;
+}
+
+.uid {
+    flex: none;
+    font-size: 0.9em;
+    color: var(--vscode-descriptionForeground);
+}
+
+.loc {
+    flex: none;
+}
+
+.title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.chip {
+    font-size: 0.8em;
+    color: var(--vscode-descriptionForeground);
+}
+
+.pill {
+    box-sizing: border-box;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 2px;
+    padding: 0 4px;
+    border: 1px solid color-mix(in srgb, var(--pill) 40%, transparent);
+    border-radius: 7px;
+    font-size: 0.8em;
+    line-height: 12px;
+    font-variant-numeric: tabular-nums;
+    color: var(--pill);
+    background: color-mix(in srgb, var(--pill) 18%, transparent);
+    --pill: var(--vscode-descriptionForeground);
+}
+
+.pill.code {
+    --pill: var(--vscode-strictdoc-codeLink);
+}
+
+.pill.test {
+    --pill: var(--vscode-strictdoc-testLink);
+}
+
+/* A zero link count is neutral grey; yellow is reserved for coverage problems. */
+.pill.zero {
+    --pill: var(--vscode-descriptionForeground);
+    opacity: 0.7;
+}
+
+/* Coverage problems: a yellow ⚠, details in the tooltip. */
+.pill.problems {
+    --pill: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow));
+    justify-content: center;
+}
+
+.pill.error {
+    --pill: var(--vscode-charts-red);
+}
+
+.row .open {
+    flex: none;
+    visibility: hidden;
+}
+
+/*
+ * A group of requirement rows shares one grid so the columns line up:
+ * stripe, lead ([marker] + title, indented per section), UID (on hover), problems (⚠),
+ * chips. Only the lead grows.
+ */
+.rows {
+    display: grid;
+    column-gap: 3px;
+    /* The title keeps at least 35% of the row and all leftover space; the UID shows on hover only. */
+    grid-template-columns: auto minmax(35%, 1fr) auto auto minmax(0, max-content);
+}
+
+/* With code links shown: two more columns for the ⟨⟩ code and ✓ tests count pills. */
+.rows.links {
+    grid-template-columns: auto minmax(35%, 1fr) auto auto auto auto minmax(0, max-content);
+}
+
+.rows .lead {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    min-width: 0;
+}
+
+/*
+ * The UID is hidden and takes no width. On hover it appears over the end of the
+ * title, which fades out under it; column widths never change, so rows don't shift.
+ */
+.rows .uid {
+    position: relative;
+    justify-self: end;
+    align-self: stretch; /* full row height, so the hover overlay's background covers the title */
+    font-size: 0.85em;
+}
+
+.rows .uid-full {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    display: none;
+    align-items: center;
+    padding-left: 16px;
+    /* Hover colour over the sidebar colour: opaque even when the theme's hover colour is not. */
+    background:
+        linear-gradient(to right, transparent, var(--vscode-list-hoverBackground) 16px),
+        linear-gradient(to right, transparent 16px, var(--vscode-sideBar-background) 16px);
+}
+
+.rows .row:hover .uid-full {
+    display: flex;
+}
+
+.home-link {
+    color: var(--vscode-textLink-foreground);
+}
+
+.card-choices {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px;
+    padding: 2px 8px;
+    font-size: 0.9em;
+    color: var(--vscode-descriptionForeground);
+}
+
+/* Border colour (the layer) set via CSSOM. */
+.card {
+    margin: 4px 6px;
+    padding: 4px 0 4px 6px;
+    border: 1px solid var(--vscode-widget-border, var(--vscode-contrastBorder, transparent));
+    border-left: 3px solid;
+    border-radius: 3px;
+    background: var(--vscode-editorWidget-background);
+}
+
+.card-head,
+.card-badges {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-right: 6px;
+}
+
+.card-layer,
+.card-counts {
+    font-size: 0.85em;
+    color: var(--vscode-descriptionForeground);
+}
+
+.card-title {
+    margin: 2px 6px 2px 0;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.card-statement {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 6;
+    overflow: hidden;
+    margin: 2px 6px 4px 0;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+    opacity: 0.85;
+}
+
+.card-links {
+    margin-top: 4px;
+    font-size: 0.8em;
+    letter-spacing: 0.05em;
+    color: var(--vscode-descriptionForeground);
+}
+
+.spacer {
+    flex: 1;
+}
+
+/* Section / subsection header inside a group of rows (per-level indent via CSSOM). */
+.rows > .group {
+    grid-column: 1 / -1;
+    padding: 4px 8px 1px 14px; /* left padding per level set via CSSOM */
+    font-size: 0.8em;
+    color: var(--vscode-descriptionForeground);
+}
+
+.rows > .row {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: subgrid;
+    position: relative;
+}
+
+/* The count is a touch smaller than the icon. */
+.pill .num {
+    font-size: 0.9em;
+}
+
+/* Pills fill their column, so both edges line up down the group. */
+.rows .pill {
+    justify-self: stretch;
+}
+
+.chips {
+    display: inline-flex;
+    gap: 3px;
+    overflow: hidden; /* first to give way on narrow sidebars */
+}
+
+/* ↗ takes no column: it floats over the row's end on hover. */
+.rows .open {
+    position: absolute;
+    right: 2px;
+    background: var(--vscode-sideBar-background);
+}
+
+.row:hover .open {
+    visibility: visible;
+}
+
+.row.code /* Fixed-width slot for the relation marker (↑ ↓). */
+.marker {
+    flex: none;
+    width: 1.2em;
+    text-align: center;
+    color: var(--vscode-descriptionForeground);
+}
+
+.icon {
+    color: var(--vscode-strictdoc-codeLink);
+}
+
+.row.test /* Fixed-width slot for the relation marker (↑ ↓). */
+.marker {
+    flex: none;
+    width: 1.2em;
+    text-align: center;
+    color: var(--vscode-descriptionForeground);
+}
+
+.icon {
+    color: var(--vscode-strictdoc-testLink);
+}
+
+/* Requirements coverage bars (Coverage view): StrictDoc tree-map coverage. */
+.summary {
+    padding: 4px 8px 2px;
+}
+
+.coverage {
+    display: grid;
+    grid-template-columns: auto minmax(2em, 1fr) auto;
+    white-space: nowrap;
+    align-items: center;
+    gap: 6px;
+    padding-right: 6px;
+    font-size: 0.85em;
+    color: var(--vscode-descriptionForeground);
+}
+
+.coverage .bar {
+    height: 5px;
+    border-radius: 3px;
+    background: color-mix(in srgb, var(--vscode-descriptionForeground) 20%, transparent);
+    overflow: hidden;
+}
+
+.coverage .fill {
+    display: block;
+    height: 100%;
+    background: var(--vscode-strictdoc-testLink);
+}
+
+.coverage.partial .num {
+    color: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow));
+}
+
+.coverage.partial .fill {
+    background: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow));
+}
+
+.coverage .num {
+    font-variant-numeric: tabular-nums;
+}
+
+/* Coverage view: one requirement heading with its two bars. */
+.coverage-block {
+    margin-bottom: 4px;
+}
+
+.row.code .icon {
+    color: var(--vscode-strictdoc-codeLink);
+}
+
+.row.test .icon {
+    color: var(--vscode-strictdoc-testLink);
+}

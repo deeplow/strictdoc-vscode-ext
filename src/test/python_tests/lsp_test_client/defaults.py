@@ -5,15 +5,18 @@ Default initialize request params.
 """
 
 import os
+import tempfile
 
-from .constants import PROJECT_ROOT
-from .utils import as_uri, get_initialization_options
+from .constants import TEST_DATA
+from .utils import as_uri
+
+TEST_PROJECT = TEST_DATA / "strictdoc_project"
 
 VSCODE_DEFAULT_INITIALIZE = {
     "processId": os.getpid(),
     "clientInfo": {"name": "vscode", "version": "1.45.0"},
-    "rootPath": str(PROJECT_ROOT),
-    "rootUri": as_uri(str(PROJECT_ROOT)),
+    "rootPath": str(TEST_PROJECT),
+    "rootUri": as_uri(str(TEST_PROJECT)),
     "capabilities": {
         "workspace": {
             "applyEdit": True,
@@ -214,6 +217,11 @@ VSCODE_DEFAULT_INITIALIZE = {
         "window": {"workDoneProgress": True},
     },
     "trace": "verbose",
-    "workspaceFolders": [{"uri": as_uri(str(PROJECT_ROOT)), "name": "my_project"}],
-    "initializationOptions": get_initialization_options(),
+    "workspaceFolders": [{"uri": as_uri(str(TEST_PROJECT)), "name": "my_project"}],
+    "initializationOptions": {
+        "settings": [
+            {"workspace": as_uri(str(TEST_PROJECT)), "projectPath": str(TEST_PROJECT)}
+        ],
+        "cacheDir": os.path.join(tempfile.gettempdir(), "strictdoc-trace-tests"),
+    },
 }

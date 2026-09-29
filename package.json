@@ -1,53 +1,42 @@
 {
-    "name": "<pytool-module>",
-    "displayName": "<pytool-display-name>",
-    "description": "Linting support for python files using `<pytool-module>`.",
-    "version": "2022.0.0-dev",
+    "name": "strictdoc-trace",
+    "displayName": "StrictDoc Trace",
+    "description": "Trace StrictDoc requirements to code and back: trace graph, hovers, go-to-definition, CodeLens and diagnostics.",
+    "version": "0.1.0",
     "preview": true,
     "serverInfo": {
-        "name": "<pytool-display-name>",
-        "module": "<pytool-module>"
+        "name": "StrictDoc Trace",
+        "module": "strictdoc"
     },
-    "publisher": "<my-publisher>",
+    "publisher": "strictdoc-trace",
     "license": "MIT",
-    "homepage": "https://github.com/<my-github>/<my-extension-project>",
-    "repository": {
-        "type": "git",
-        "url": "https://github.com/<my-github>/<my-extension-project>.git"
-    },
-    "bugs": {
-        "url": "https://github.com/<my-github>/<my-extension-project>/issues"
-    },
     "galleryBanner": {
         "color": "#1e415e",
         "theme": "dark"
     },
     "keywords": [
-        "python",
-        "<pytool-module>"
+        "strictdoc",
+        "requirements",
+        "traceability",
+        "sdoc"
     ],
     "engines": {
         "vscode": "^1.78.0"
     },
     "categories": [
         "Programming Languages",
-        "Linters",
-        "Formatters"
-    ],
-    "extensionDependencies": [
-        "ms-python.python"
+        "Other"
     ],
     "capabilities": {
         "virtualWorkspaces": {
             "supported": false,
-            "description": "Virtual Workspaces are not supported with <pytool-display-name>."
+            "description": "Virtual Workspaces are not supported with StrictDoc Trace."
         }
     },
     "activationEvents": [
-        "onLanguage:python",
-        "workspaceContains:*.py",
-        "onNotebook:jupyter-notebook",
-        "onNotebook:interactive"
+        "workspaceContains:**/*.sdoc",
+        "workspaceContains:**/strictdoc_config.py",
+        "workspaceContains:**/strictdoc.toml"
     ],
     "main": "./dist/extension.js",
     "scripts": {
@@ -61,59 +50,41 @@
         "lint": "eslint src",
         "format-check": "prettier --check 'src/**/*.ts' 'build/**/*.yml' '.github/**/*.yml'",
         "test": "node ./out/test/runTest.js",
-        "vsce-package": "vsce package -o <pytool-module>.vsix"
+        "vsce-package": "vsce package --allow-missing-repository -o strictdoc-trace.vsix"
     },
     "contributes": {
         "configuration": {
             "properties": {
-                "<pytool-module>.cwd": {
+                "strictdoc.projectPath": {
                     "default": "${workspaceFolder}",
-                    "description": "Sets the working directory for <pytool-module>. Supported variables: `${workspaceFolder}` (workspace root) and `${fileDirname}` (directory of the current file).",
+                    "description": "Folder of the StrictDoc project (contains `.sdoc` files and `strictdoc_config.py`). Supports `${workspaceFolder}`.",
                     "scope": "resource",
                     "type": "string"
                 },
-                "<pytool-module>.args": {
-                    "default": [],
-                    "description": "Arguments passed in. Each argument is a separate item in the array.",
-                    "items": {
-                        "type": "string"
-                    },
-                    "scope": "resource",
-                    "type": "array"
-                },
-                "<pytool-module>.path": {
-                    "default": [],
-                    "description": "When set to a path to <pytool-module> binary, extension will use that. NOTE: Using this option may slowdown server response time.",
-                    "scope": "resource",
-                    "items": {
-                        "type": "string"
-                    },
-                    "type": "array"
-                },
-                "<pytool-module>.importStrategy": {
+                "strictdoc.importStrategy": {
                     "default": "useBundled",
-                    "description": "Defines where `<pytool-module>` is imported from. This setting may be ignored if `<pytool-module>.path` is set.",
+                    "description": "Defines where the bundled language server libraries (pygls) are imported from. strictdoc itself must be installed in the selected interpreter.",
                     "enum": [
                         "useBundled",
                         "fromEnvironment"
                     ],
                     "enumDescriptions": [
-                        "Always use the bundled version of `<pytool-module>`.",
-                        "Use `<pytool-module>` from environment, fallback to bundled version only if `<pytool-module>` not available in the environment."
+                        "Always use the bundled libraries.",
+                        "Use libraries from the environment, fall back to the bundled ones if not available."
                     ],
                     "scope": "window",
                     "type": "string"
                 },
-                "<pytool-module>.interpreter": {
+                "strictdoc.interpreter": {
                     "default": [],
-                    "description": "When set to a path to python executable, extension will use that to launch the server and any subprocess.",
+                    "description": "Python executable (with strictdoc >= 0.30.1) used to run the server. When empty: .venv in the StrictDoc project folder, then python3 from PATH.",
                     "scope": "resource",
                     "items": {
                         "type": "string"
                     },
                     "type": "array"
                 },
-                "<pytool-module>.showNotifications": {
+                "strictdoc.showNotifications": {
                     "default": "off",
                     "description": "Controls when notifications are shown by this extension.",
                     "enum": [
@@ -130,20 +101,223 @@
                     ],
                     "scope": "machine",
                     "type": "string"
+                },
+                "strictdoc.codeLens.enabled": {
+                    "default": true,
+                    "description": "Show StrictDoc CodeLens in `.sdoc` and code files.",
+                    "scope": "resource",
+                    "type": "boolean"
                 }
             }
         },
         "commands": [
             {
+                "command": "strictdoc.restart",
                 "title": "Restart Server",
-                "category": "<pytool-display-name>",
-                "command": "<pytool-module>.restart"
+                "category": "StrictDoc"
+            },
+            {
+                "command": "strictdoc.rebuild",
+                "title": "Rebuild Index",
+                "category": "StrictDoc",
+                "icon": "$(refresh)"
+            },
+            {
+                "command": "strictdoc.focusRequirement",
+                "title": "Focus Requirement in Trace Graph",
+                "category": "StrictDoc"
+            },
+            {
+                "command": "strictdoc.goToRequirement",
+                "title": "Go to Requirement",
+                "category": "StrictDoc"
+            },
+            {
+                "command": "strictdoc.goToCode",
+                "title": "Go to Code",
+                "category": "StrictDoc"
+            },
+            {
+                "command": "strictdoc.insertRelationMarker",
+                "title": "Insert Relation Marker",
+                "category": "StrictDoc"
+            },
+            {
+                "command": "strictdoc.toggleUntracedFilter",
+                "title": "Toggle Untraced Filter",
+                "category": "StrictDoc",
+                "icon": "$(filter)"
+            },
+            {
+                "command": "strictdoc.openLocation",
+                "title": "Open Location",
+                "category": "StrictDoc"
+            }
+        ],
+        "languages": [
+            {
+                "id": "sdoc",
+                "aliases": [
+                    "StrictDoc",
+                    "sdoc"
+                ],
+                "extensions": [
+                    ".sdoc"
+                ],
+                "configuration": "./language-configuration.json"
+            }
+        ],
+        "grammars": [
+            {
+                "language": "sdoc",
+                "scopeName": "source.sdoc",
+                "path": "./syntaxes/sdoc.tmLanguage.json"
+            }
+        ],
+        "viewsContainers": {
+            "activitybar": [
+                {
+                    "id": "strictdoc",
+                    "title": "StrictDoc",
+                    "icon": "media/strictdoc.svg"
+                }
+            ]
+        },
+        "views": {
+            "strictdoc": [
+                {
+                    "type": "webview",
+                    "id": "strictdoc.traceGraph",
+                    "name": "Trace Graph"
+                },
+                {
+                    "type": "webview",
+                    "id": "strictdoc.coverage",
+                    "name": "Coverage"
+                },
+                {
+                    "id": "strictdoc.requirements",
+                    "name": "Requirements"
+                }
+            ]
+        },
+        "menus": {
+            "commandPalette": [
+                {
+                    "command": "strictdoc.focusRequirement",
+                    "when": "false"
+                },
+                {
+                    "command": "strictdoc.openLocation",
+                    "when": "false"
+                }
+            ],
+            "view/title": [
+                {
+                    "command": "strictdoc.rebuild",
+                    "when": "view == strictdoc.requirements",
+                    "group": "navigation"
+                },
+                {
+                    "command": "strictdoc.toggleUntracedFilter",
+                    "when": "view == strictdoc.requirements",
+                    "group": "navigation"
+                }
+            ],
+            "editor/context": [
+                {
+                    "command": "strictdoc.goToRequirement",
+                    "when": "editorLangId != sdoc",
+                    "group": "navigation@90"
+                },
+                {
+                    "command": "strictdoc.goToCode",
+                    "when": "editorLangId == sdoc",
+                    "group": "navigation@90"
+                }
+            ]
+        },
+        "keybindings": [
+            {
+                "command": "strictdoc.goToRequirement",
+                "key": "ctrl+alt+r",
+                "when": "editorTextFocus"
+            }
+        ],
+        "colors": [
+            {
+                "id": "strictdoc.depth0",
+                "description": "Colour of top-level requirements (depth 0 in the parent/child graph).",
+                "defaults": {
+                    "dark": "#5B8DEF",
+                    "light": "#1F4FC2",
+                    "highContrast": "#5B8DEF",
+                    "highContrastLight": "#1F4FC2"
+                }
+            },
+            {
+                "id": "strictdoc.depth1",
+                "description": "Colour of second-level requirements (depth 1 in the parent/child graph).",
+                "defaults": {
+                    "dark": "#2EC4B6",
+                    "light": "#0E8C80",
+                    "highContrast": "#2EC4B6",
+                    "highContrastLight": "#0E8C80"
+                }
+            },
+            {
+                "id": "strictdoc.depth2",
+                "description": "Colour of third-level requirements (depth 2 in the parent/child graph).",
+                "defaults": {
+                    "dark": "#C2EB6E",
+                    "light": "#6BA31A",
+                    "highContrast": "#C2EB6E",
+                    "highContrastLight": "#6BA31A"
+                }
+            },
+            {
+                "id": "strictdoc.depth3",
+                "description": "Colour of fourth-level requirements (depth 3 in the parent/child graph).",
+                "defaults": {
+                    "dark": "#F2C84B",
+                    "light": "#B8860B",
+                    "highContrast": "#F2C84B",
+                    "highContrastLight": "#B8860B"
+                }
+            },
+            {
+                "id": "strictdoc.depth4",
+                "description": "Colour of fifth-level and deeper requirements (depth 4 in the parent/child graph).",
+                "defaults": {
+                    "dark": "#F28C38",
+                    "light": "#C8561B",
+                    "highContrast": "#F28C38",
+                    "highContrastLight": "#C8561B"
+                }
+            },
+            {
+                "id": "strictdoc.codeLink",
+                "description": "Code links (implementation) in the Trace Graph.",
+                "defaults": {
+                    "dark": "#3794D1",
+                    "light": "#0F6CA8",
+                    "highContrast": "#3794D1",
+                    "highContrastLight": "#0F6CA8"
+                }
+            },
+            {
+                "id": "strictdoc.testLink",
+                "description": "Test links (verification) in the Trace Graph.",
+                "defaults": {
+                    "dark": "#6CC56A",
+                    "light": "#2E7D32",
+                    "highContrast": "#6CC56A",
+                    "highContrastLight": "#2E7D32"
+                }
             }
         ]
     },
     "dependencies": {
-        "@vscode/python-environments": "^1.0.0",
-        "@vscode/python-extension": "^1.0.6",
         "fs-extra": "^11.4.0",
         "vscode-languageclient": "^8.1.0"
     },

@@ -1,0 +1,29 @@
+[DOCUMENT]
+TITLE: Sample requirements
+
+[REQUIREMENT]
+UID: REQ-1
+TITLE: System shall do X
+STATEMENT: The system shall do X.
+
+[REQUIREMENT]
+UID: REQ-2
+TITLE: Helper for X
+STATEMENT: A helper function supports X.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-1
+- TYPE: File
+  PATH: src/app.py
+  FUNCTION: helper
+- TYPE: File
+  PATH: src/lib.c
+  LINE_RANGE: 11, 13
+
+[REQUIREMENT]
+UID: REQ-3
+TITLE: Untraced requirement
+STATEMENT: Nothing implements this yet.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-1

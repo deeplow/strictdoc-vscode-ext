@@ -1,0 +1,82 @@
+{
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "StrictDoc",
+    "scopeName": "source.sdoc",
+    "patterns": [
+        {
+            "include": "#multiline"
+        },
+        {
+            "include": "#nodeTag"
+        },
+        {
+            "include": "#relation"
+        },
+        {
+            "include": "#field"
+        }
+    ],
+    "repository": {
+        "nodeTag": {
+            "match": "^\\[{1,2}/?[A-Z_]+\\]{1,2}\\s*$",
+            "name": "keyword.control.sdoc"
+        },
+        "relation": {
+            "match": "^\\s*(-)\\s+(TYPE)(:)\\s*(.*)$",
+            "captures": {
+                "1": {
+                    "name": "punctuation.definition.list.sdoc"
+                },
+                "2": {
+                    "name": "variable.other.property.sdoc"
+                },
+                "3": {
+                    "name": "punctuation.separator.sdoc"
+                },
+                "4": {
+                    "name": "entity.name.type.sdoc"
+                }
+            }
+        },
+        "field": {
+            "match": "^\\s*([A-Z_][A-Z0-9_]*)(:)\\s*(.*)$",
+            "captures": {
+                "1": {
+                    "name": "variable.other.property.sdoc"
+                },
+                "2": {
+                    "name": "punctuation.separator.sdoc"
+                },
+                "3": {
+                    "name": "string.unquoted.sdoc"
+                }
+            }
+        },
+        "multiline": {
+            "begin": "^\\s*([A-Z_][A-Z0-9_]*)(:)\\s*(>>>)\\s*$",
+            "end": "^(<<<)\\s*$",
+            "beginCaptures": {
+                "1": {
+                    "name": "variable.other.property.sdoc"
+                },
+                "2": {
+                    "name": "punctuation.separator.sdoc"
+                },
+                "3": {
+                    "name": "punctuation.definition.string.begin.sdoc"
+                }
+            },
+            "endCaptures": {
+                "1": {
+                    "name": "punctuation.definition.string.end.sdoc"
+                }
+            },
+            "patterns": [
+                {
+                    "match": ".+",
+                    "name": "string.unquoted.block.sdoc"
+                }
+            ]
+        }
+    }
+}
