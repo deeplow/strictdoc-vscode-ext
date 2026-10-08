@@ -42,11 +42,23 @@
             h('div', { class: 'summary' }, ...bars(r.coverage)));
     }
 
+    /** Why there is no index (no configuration selected, or a failed build), or null. */
+    function notice(info) {
+        if (!info.needsConfig && !info.error) {
+            return null;
+        }
+        const text = info.needsConfig
+            ? 'Select the StrictDoc configuration to load requirements.'
+            : `StrictDoc could not build the index for ${info.projectDir}: ${info.error}`;
+        return h('div', { class: 'notice' }, h('div', {}, text),
+            h('button', { class: 'primary', onclick: () => vscode.postMessage({ type: 'selectConfig' }) }, 'Select configuration…'));
+    }
+
     const app = document.getElementById('app');
 
     function render(data) {
         if (!data.project) {
-            app.replaceChildren(h('div', { class: 'status' }, 'Waiting for the StrictDoc index…'));
+            app.replaceChildren(notice(data) || h('div', { class: 'status' }, 'Waiting for the StrictDoc index…'));
             return;
         }
         app.replaceChildren(

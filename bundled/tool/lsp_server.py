@@ -73,6 +73,9 @@ WORKSPACE_SETTINGS = {}
 CACHE_DIR = os.path.join(tempfile.gettempdir(), "strictdoc-trace")
 
 MODEL = None  # last good trace_model.TraceModel
+# Why there is no MODEL: {"needsConfig": True} until a configuration is chosen, or
+# {"error": message} when StrictDoc failed; None once an index exists or while building.
+NO_INDEX: dict | None = None
 PUBLISHED_URIS: set[str] = set()
 BUILD_LOCK = threading.Lock()
 BUILD_TIMER: threading.Timer | None = None
@@ -99,13 +102,19 @@ def build() -> tuple[bool, int]:
 
     Returns (ok, error_count). On failure the last good model is kept.
     """
-    global MODEL  # pylint: disable=global-statement
+    global MODEL, NO_INDEX  # pylint: disable=global-statement
     if STRICTDOC_ERROR:
         log_error(STRICTDOC_ERROR)
         return False, 1
 
     with BUILD_LOCK:
         project_dir = _get_project_dir()
+        if _settings().get("needsConfig"):
+            # No configuration chosen yet: ask for one instead of building with defaults.
+            log_to_output("No StrictDoc configuration selected: not building the index.")
+            NO_INDEX = {"needsConfig": True, "projectDir": project_dir}
+            LSP_SERVER.protocol.notify("strictdoc/indexUpdated", {**NO_INDEX, "requirementCount": 0, "errorCount": 0})
+            return False, 0
         log_to_output(f"Building StrictDoc index for {project_dir}")
         # build_model captures strictdoc output and turns failures into errors.
         model, errors = trace_model.build_model(project_dir, CACHE_DIR)
@@ -113,10 +122,16 @@ def build() -> tuple[bool, int]:
             log_to_output(f"{error.path}:{error.line + 1}: {error.message}")
         if model is not None:
             MODEL = model
+        NO_INDEX = (
+            {"error": errors[0].message, "projectDir": project_dir}
+            if MODEL is None and errors
+            else None
+        )
         _publish_diagnostics(trace_features.diagnostics(MODEL, errors))
         LSP_SERVER.protocol.notify(
             "strictdoc/indexUpdated",
             {
+                **(NO_INDEX or {}),
                 "requirementCount": len(MODEL.requirements) if MODEL else 0,
                 "errorCount": len(errors),
             },
@@ -238,7 +253,7 @@ def requirements(_params=None) -> dict:
 def roots(_params=None) -> dict:
     """Return the top-level requirements: {nodes: [...]}."""
     if MODEL is None:
-        return {"nodes": []}
+        return {"nodes": [], **(NO_INDEX or {})}
     return trace_features.roots(MODEL)
 
 
@@ -246,7 +261,7 @@ def roots(_params=None) -> dict:
 def coverage(params=None) -> dict:
     """Requirements coverage: project, top-level requirements, optional focus uid."""
     if MODEL is None:
-        return {"project": None, "roots": [], "focus": None}
+        return {"project": None, "roots": [], "focus": None, **(NO_INDEX or {})}
     return trace_features.coverage(MODEL, _param(params, "uid"))
 
 
@@ -322,9 +337,13 @@ def _update_workspace_settings(settings):
         WORKSPACE_SETTINGS[key] = {**setting, "workspaceFS": key}
 
 
+def _settings() -> dict:
+    """The settings of the first workspace (multi-root not supported)."""
+    return next(iter(WORKSPACE_SETTINGS.values()))
+
+
 def _get_project_dir() -> str:
-    """The StrictDoc project of the first workspace (multi-root not supported)."""
-    settings = next(iter(WORKSPACE_SETTINGS.values()))
+    settings = _settings()
     return settings.get("projectPath") or settings["workspaceFS"]
 
 

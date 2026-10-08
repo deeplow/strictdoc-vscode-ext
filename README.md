@@ -37,11 +37,29 @@ The index is rebuilt when files are saved (StrictDoc reads from disk).
 - Source traceability enabled in `strictdoc_config.py` is recommended; the
   extension enables it for its own index regardless.
 
+## Project configuration
+
+The extension builds its index from the folder holding the StrictDoc
+configuration (`strictdoc_config.py` or `strictdoc.toml`), as
+`cd <folder> && strictdoc export .` would.
+
+- **One configuration** in the workspace: it is used automatically. Files are
+  listed with `git ls-files`, so anything in `.gitignore` and the contents of
+  submodules are skipped. Outside git, VS Code's file search is used.
+- **Several, or none**: nothing is built until you pick one with
+  **StrictDoc: Select Project Configuration…** (also offered by a notification
+  and by the button in the Trace Graph and Coverage views). The choice is saved
+  as `strictdoc.projectPath` in the folder's `.vscode/settings.json`.
+- Set `strictdoc.projectPath` yourself to override the detection.
+
+If StrictDoc fails to build the index, the error is shown in the views and in a
+notification. The full build log is in Output → StrictDoc Trace.
+
 ## Settings
 
 | Setting                       | Default              | Description                                                   |
 | ----------------------------- | -------------------- | ------------------------------------------------------------- |
-| `strictdoc.projectPath`       | `${workspaceFolder}` | Folder with `.sdoc` files and `strictdoc_config.py`.          |
+| `strictdoc.projectPath`       | auto-detected        | Folder with the StrictDoc configuration (see above).          |
 | `strictdoc.codeLens.enabled`  | `true`               | Show CodeLens.                                                |
 | `strictdoc.interpreter`       | `[]`                 | Python used to run the server (see lookup order above).       |
 | `strictdoc.importStrategy`    | `useBundled`         | Where the server's pygls libraries come from.                 |

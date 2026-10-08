@@ -57,7 +57,7 @@
             "properties": {
                 "strictdoc.projectPath": {
                     "default": "${workspaceFolder}",
-                    "description": "Folder of the StrictDoc project (contains `.sdoc` files and `strictdoc_config.py`). Supports `${workspaceFolder}`.",
+                    "markdownDescription": "Folder of the StrictDoc project (contains `strictdoc_config.py` or `strictdoc.toml`). Supports `${workspaceFolder}`. When unset, the only configuration in the workspace is used; with several, run **StrictDoc: Select Project Configuration…**.",
                     "scope": "resource",
                     "type": "string"
                 },
@@ -114,6 +114,11 @@
             {
                 "command": "strictdoc.restart",
                 "title": "Restart Server",
+                "category": "StrictDoc"
+            },
+            {
+                "command": "strictdoc.selectConfig",
+                "title": "Select Project Configuration…",
                 "category": "StrictDoc"
             },
             {

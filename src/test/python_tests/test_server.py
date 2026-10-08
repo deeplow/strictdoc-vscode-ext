@@ -7,9 +7,10 @@ StrictDoc prints to stdout, so any response arriving here also proves that
 the protocol stream is not corrupted.
 """
 
+import copy
 from threading import Event
 
-from hamcrest import assert_that, contains_string, ends_with, has_item, is_
+from hamcrest import assert_that, contains_string, ends_with, has_item, is_, not_none
 
 from .lsp_test_client import defaults, session, utils
 
@@ -66,3 +67,47 @@ def test_round_trip():
 
         rebuilt = ls_session.request("strictdoc/rebuild", {})
         assert_that(rebuilt, is_({"ok": True, "errorCount": 0}))
+
+
+def _start(settings):
+    """Initialize with the given workspace settings; returns the first index update."""
+    init = copy.deepcopy(defaults.VSCODE_DEFAULT_INITIALIZE)
+    init["initializationOptions"]["settings"][0].update(settings)
+    ls_session = session.LspSession()
+    ls_session.__enter__()
+    updates = []
+    index_updated = Event()
+    ls_session.set_notification_callback(
+        session.INDEX_UPDATED, lambda u: (updates.append(u), index_updated.set())
+    )
+    ls_session.initialize(init)
+    assert_that(index_updated.wait(TIMEOUT), is_(True))
+    return ls_session, updates[0]
+
+
+def test_needs_config():
+    """Without a chosen configuration the server asks for one instead of building."""
+    ls_session, update = _start({"needsConfig": True})
+    try:
+        assert_that(update["needsConfig"], is_(True))
+        assert_that(ls_session.request("strictdoc/roots", {})["needsConfig"], is_(True))
+        coverage = ls_session.request("strictdoc/coverage", {})
+        assert_that(coverage["needsConfig"], is_(True))
+        assert_that(coverage.get("error"), is_(None))
+    finally:
+        ls_session.__exit__(None, None, None)
+
+
+def test_build_error(tmp_path):
+    """A failed build reports its error and project folder to the views."""
+    (tmp_path / "broken.sdoc").write_text("[DOCUMENT]\nNOT A FIELD\n", encoding="utf-8")
+    ls_session, update = _start({"projectPath": str(tmp_path)})
+    try:
+        assert_that(update["projectDir"], is_(str(tmp_path)))
+        assert_that(update["error"], is_(not_none()))
+        roots = ls_session.request("strictdoc/roots", {})
+        assert_that(roots["error"], is_(update["error"]))
+        coverage = ls_session.request("strictdoc/coverage", {})
+        assert_that(coverage["projectDir"], is_(str(tmp_path)))
+    finally:
+        ls_session.__exit__(None, None, None)

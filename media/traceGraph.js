@@ -53,6 +53,7 @@
     let state = { includeCode: false, showWarnings: true, history: [] };
     let list = [];
     let status = '';
+    let noIndex = {}; // {needsConfig} or {error, projectDir} when the server has no index
 
     function h(tag, attrs, ...kids) {
         const el = document.createElement(tag);
@@ -265,6 +266,18 @@
         }
     }
 
+    /** Why there is no index (no configuration selected, or a failed build), or null. */
+    function notice(info) {
+        if (!info.needsConfig && !info.error) {
+            return null;
+        }
+        const text = info.needsConfig
+            ? 'Select the StrictDoc configuration to load requirements.'
+            : `StrictDoc could not build the index for ${info.projectDir}: ${info.error}`;
+        return h('div', { class: 'notice' }, h('div', {}, text),
+            h('button', { class: 'primary', onclick: () => post({ type: 'selectConfig' }) }, 'Select configuration…'));
+    }
+
     function render() {
         back.disabled = !state.history.length;
         homeButton.disabled = !data;
@@ -277,7 +290,7 @@
         if (status) {
             kids.push(h('div', { class: 'status' }, status));
         }
-        kids.push(data ? card(data) : home());
+        kids.push(data ? card(data) : notice(noIndex) || home());
         content.replaceChildren(...kids);
     }
 
@@ -292,6 +305,7 @@
         } else if (msg.type === 'home') {
             data = undefined;
             roots = msg.nodes;
+            noIndex = msg;
             status = '';
         } else if (msg.type === 'list') {
             list = msg.items;

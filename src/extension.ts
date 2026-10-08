@@ -8,7 +8,8 @@ import { restartServer } from './common/server';
 import { checkIfConfigurationChanged } from './common/settings';
 import { loadServerDefaults } from './common/setup';
 import { LS_SERVER_RESTART_DELAY } from './common/constants';
-import { getLSClientTraceLevel } from './common/utilities';
+import { selectConfig } from './common/strictdocConfigs';
+import { getLSClientTraceLevel, getProjectRoot } from './common/utilities';
 import { createOutputChannel, onDidChangeConfiguration, registerCommand } from './common/vscodeapi';
 import { registerNavigationCommands } from './navigation';
 import { RequirementsTreeProvider } from './requirementsTree';
@@ -56,11 +57,32 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     context.subscriptions.push(traceGraph.onDidChangeFocus((uid) => coverage.setFocus(uid)));
     let indexUpdated: vscode.Disposable | undefined;
     let followTimer: NodeJS.Timeout | undefined;
+    let lastBuildError: string | undefined; // notified once per failure message
+
+    const onBuildError = async (error: string, projectDir: string) => {
+        if (error === lastBuildError) {
+            return;
+        }
+        lastBuildError = error;
+        const choice = await vscode.window.showErrorMessage(
+            `StrictDoc could not build the index for ${projectDir}: ${error}`,
+            'Select configuration…',
+            'Show log',
+        );
+        if (choice === 'Show log') {
+            outputChannel.show();
+        } else if (choice) {
+            await vscode.commands.executeCommand('strictdoc.selectConfig');
+        }
+    };
 
     // Called after every (re)start: refresh the views now and whenever the server rebuilds its index.
     const onClientStarted = () => {
         indexUpdated?.dispose();
-        indexUpdated = lsClient?.onNotification('strictdoc/indexUpdated', () => {
+        indexUpdated = lsClient?.onNotification('strictdoc/indexUpdated', (params) => {
+            if (params?.error) {
+                void onBuildError(params.error, params.projectDir);
+            }
             requirementsTree.refresh();
             traceGraph.refresh();
             coverage.refresh();
@@ -99,6 +121,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.window.registerTreeDataProvider('strictdoc.requirements', requirementsTree),
         vscode.window.registerWebviewViewProvider('strictdoc.traceGraph', traceGraph),
         vscode.window.registerWebviewViewProvider('strictdoc.coverage', coverage),
+        registerCommand('strictdoc.selectConfig', async () => selectConfig(await getProjectRoot())),
         registerCommand('strictdoc.rebuild', () => lsClient?.sendRequest('strictdoc/rebuild', {})),
         registerCommand('strictdoc.toggleUntracedFilter', () => requirementsTree.toggleUntracedFilter()),
         registerCommand('strictdoc.focusRequirement', async (uid: string) => {

@@ -23,6 +23,8 @@ export class CoverageViewProvider implements vscode.WebviewViewProvider {
         view.webview.onDidReceiveMessage((msg: { type: string; uid: string }) => {
             if (msg.type === 'ready') {
                 void this.refresh();
+            } else if (msg.type === 'selectConfig') {
+                void vscode.commands.executeCommand('strictdoc.selectConfig');
             } else if (msg.type === 'focus') {
                 void vscode.commands.executeCommand('strictdoc.focusRequirement', msg.uid);
             }

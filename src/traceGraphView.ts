@@ -16,7 +16,7 @@ interface GraphData {
 
 /** Messages from the webview (fields depend on `type`). */
 interface Message {
-    type: 'ready' | 'search' | 'focus' | 'home' | 'open' | 'toggleCode' | 'toggleWarnings' | 'back';
+    type: 'ready' | 'search' | 'focus' | 'home' | 'open' | 'toggleCode' | 'toggleWarnings' | 'back' | 'selectConfig';
     uid: string;
     uri: string;
     line: number;
@@ -99,8 +99,9 @@ export class TraceGraphViewProvider implements vscode.WebviewViewProvider {
         const { includeCode } = this.state;
         try {
             if (!focus) {
-                const { nodes } = await client.sendRequest<{ nodes: unknown[] }>('strictdoc/roots', {});
-                this.post({ type: 'home', nodes, state: this.state });
+                // nodes, plus needsConfig or error (and projectDir) when there is no index
+                const roots = await client.sendRequest<{ nodes: unknown[] }>('strictdoc/roots', {});
+                this.post({ type: 'home', ...roots, state: this.state });
                 this.focusChanged.fire(undefined);
                 return;
             }
@@ -179,6 +180,9 @@ export class TraceGraphViewProvider implements vscode.WebviewViewProvider {
                 // Display only: the webview already has the data.
                 this.state.showWarnings = !this.state.showWarnings;
                 this.post({ type: 'state', state: this.state });
+                break;
+            case 'selectConfig':
+                void vscode.commands.executeCommand('strictdoc.selectConfig');
                 break;
             case 'back': {
                 if (!this.state.history.length) {
