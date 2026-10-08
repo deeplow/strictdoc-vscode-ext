@@ -162,7 +162,7 @@
             stripe(n.depth),
             lead,
             // Takes no width; the UID appears over the end of the title on hover.
-            h('span', { class: 'uid' }, h('span', { class: 'uid-full' }, n.uid)),
+            h('span', { class: 'uid' }, h('span', { class: 'uid-full' }, h('span', { class: 'uid-box' }, n.uid))),
             ...links,
             problemsPill(n),
             h('span', { class: 'chips' }, ...chips(n)),

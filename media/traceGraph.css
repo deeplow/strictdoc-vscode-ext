@@ -276,6 +276,14 @@ button.primary:hover:not(:disabled) {
     display: flex;
 }
 
+/* A box sets the UID apart from the title it covers. */
+.uid-box {
+    padding: 0 4px;
+    border: 1px solid color-mix(in srgb, var(--vscode-descriptionForeground) 50%, transparent);
+    border-radius: 4px;
+    line-height: 14px;
+}
+
 .home-link {
     color: var(--vscode-textLink-foreground);
 }
