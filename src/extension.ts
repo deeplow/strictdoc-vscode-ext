@@ -13,7 +13,6 @@ import { getLSClientTraceLevel, getProjectRoot } from './common/utilities';
 import { createOutputChannel, onDidChangeConfiguration, registerCommand } from './common/vscodeapi';
 import { registerNavigationCommands } from './navigation';
 import { RequirementsTreeProvider } from './requirementsTree';
-import { CoverageViewProvider } from './coverageView';
 import { TraceGraphViewProvider } from './traceGraphView';
 
 let lsClient: LanguageClient | undefined;
@@ -53,8 +52,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const getClient = () => lsClient;
     const requirementsTree = new RequirementsTreeProvider(getClient);
     const traceGraph = new TraceGraphViewProvider(context.extensionUri, getClient);
-    const coverage = new CoverageViewProvider(context.extensionUri, getClient);
-    context.subscriptions.push(traceGraph.onDidChangeFocus((uid) => coverage.setFocus(uid)));
     let indexUpdated: vscode.Disposable | undefined;
     let followTimer: NodeJS.Timeout | undefined;
     let lastBuildError: string | undefined; // notified once per failure message
@@ -85,11 +82,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             }
             requirementsTree.refresh();
             traceGraph.refresh();
-            coverage.refresh();
         });
         requirementsTree.refresh();
         traceGraph.refresh();
-        coverage.refresh();
     };
 
     const runServer = async () => {
@@ -120,7 +115,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }),
         vscode.window.registerTreeDataProvider('strictdoc.requirements', requirementsTree),
         vscode.window.registerWebviewViewProvider('strictdoc.traceGraph', traceGraph),
-        vscode.window.registerWebviewViewProvider('strictdoc.coverage', coverage),
         registerCommand('strictdoc.selectConfig', async () => selectConfig(await getProjectRoot())),
         registerCommand('strictdoc.rebuild', () => lsClient?.sendRequest('strictdoc/rebuild', {})),
         registerCommand('strictdoc.toggleUntracedFilter', () => requirementsTree.toggleUntracedFilter()),

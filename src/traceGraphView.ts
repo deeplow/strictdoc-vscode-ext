@@ -38,9 +38,6 @@ export class TraceGraphViewProvider implements vscode.WebviewViewProvider {
     private view?: vscode.WebviewView;
     private data?: GraphData;
     private state: State = { includeCode: false, showWarnings: true, history: [] };
-    private readonly focusChanged = new vscode.EventEmitter<string | undefined>();
-    /** The focused requirement changed (undefined: the top-level list is shown). */
-    readonly onDidChangeFocus = this.focusChanged.event;
 
     constructor(
         private readonly extensionUri: vscode.Uri,
@@ -102,7 +99,6 @@ export class TraceGraphViewProvider implements vscode.WebviewViewProvider {
                 // nodes, plus needsConfig or error (and projectDir) when there is no index
                 const roots = await client.sendRequest<{ nodes: unknown[] }>('strictdoc/roots', {});
                 this.post({ type: 'home', ...roots, state: this.state });
-                this.focusChanged.fire(undefined);
                 return;
             }
             const data = await client.sendRequest<GraphData>('strictdoc/graph', {
@@ -120,7 +116,6 @@ export class TraceGraphViewProvider implements vscode.WebviewViewProvider {
             this.state.focus = focus;
             this.data = data;
             this.postGraph();
-            this.focusChanged.fire(data.focus[0]);
         } catch (err) {
             this.post({ type: 'status', text: `Trace graph failed: ${err}` });
         }

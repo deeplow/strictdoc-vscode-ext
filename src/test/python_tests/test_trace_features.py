@@ -224,21 +224,19 @@ def test_zero_counts_are_warning_pills(model):
     assert not any(b["zero"] for b in nodes["REQ-1"]["badges"])
 
 
-def test_coverage_view(model):
-    result = tf.coverage(model, "REQ-2")
+def test_coverage(model):
+    result = tf.roots(model)
     assert result["project"] == {"requirements": 3, "withSource": 2, "withTests": 2}
-    assert [(r["uid"], r["coverage"]) for r in result["roots"]] == [
+    assert [(r["uid"], r["coverage"]) for r in result["nodes"]] == [
         ("REQ-1", {"requirements": 3, "withSource": 2, "withTests": 2})
     ]
-    assert result["focus"]["uid"] == "REQ-2"
-    assert result["focus"]["coverage"] == {
+    nodes = {
+        n["uid"]: n for n in tf.graph(model, "REQ-1", None, None, 1, 1, False)["nodes"]
+    }
+    assert nodes["REQ-2"]["coverage"] == {
         "requirements": 1,
         "withSource": 1,
         "withTests": 1,
-    }
-    assert tf.coverage(model)["focus"] is None
-    nodes = {
-        n["uid"]: n for n in tf.graph(model, "REQ-1", None, None, 1, 1, False)["nodes"]
     }
     missing = {
         b["kind"]: (b["missing"], b["missingTitle"]) for b in nodes["REQ-3"]["badges"]

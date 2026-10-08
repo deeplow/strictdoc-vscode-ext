@@ -257,14 +257,6 @@ def roots(_params=None) -> dict:
     return trace_features.roots(MODEL)
 
 
-@LSP_SERVER.feature("strictdoc/coverage")
-def coverage(params=None) -> dict:
-    """Requirements coverage: project, top-level requirements, optional focus uid."""
-    if MODEL is None:
-        return {"project": None, "roots": [], "focus": None, **(NO_INDEX or {})}
-    return trace_features.coverage(MODEL, _param(params, "uid"))
-
-
 @LSP_SERVER.feature("strictdoc/graph")
 def graph(params=None) -> dict:
     """Return the lineage subgraph around a uid or a document position."""

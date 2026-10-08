@@ -368,37 +368,21 @@ def graph(model, uid, path, line, up, down, include_code) -> dict:
     }
 
 
-def coverage(model, uid: str | None = None) -> dict:
-    """Requirements coverage with source / tests (StrictDoc tree map): the whole
-    project, each top-level requirement, and optionally one focused requirement."""
-
-    def entry(req: Requirement) -> dict:
-        return {
-            "uid": req.uid,
-            "title": req.title,
-            "depth": req.depth,
-            "coverage": _coverage(model, _subtree(model, req.uid)),
-        }
-
-    focus = model.requirements.get(uid) if uid else None
-    return {
-        "project": _coverage(model, model.requirements),
-        "roots": [entry(r) for r in model.requirements.values() if not r.parents],
-        "focus": entry(focus) if focus else None,
-    }
-
-
 def roots(model) -> dict:
     """Top-level requirements (no parents), in document order."""
     top = [r for r in model.requirements.values() if not r.parents]
-    return {"nodes": [_node_dict(model, r) for r in top]}
+    return {
+        "nodes": [_node_dict(model, r) for r in top],
+        "project": _coverage(model, model.requirements),
+    }
 
 
 def _node_dict(model, req: Requirement) -> dict:
     """A requirement for the Trace Graph. Link pills count the whole subtree
     (the requirement and its descendants); `own*` count its own links only."""
     own_code, own_tests = _split(req.code)
-    links = [l for u in _subtree(model, req.uid) for l in model.requirements[u].code]
+    subtree = _subtree(model, req.uid)
+    links = [l for u in subtree for l in model.requirements[u].code]
     code, tests = _split(links)
     badges = []
     for kind, total, own, icon, noun, missing, what in (
@@ -438,6 +422,7 @@ def _node_dict(model, req: Requirement) -> dict:
         "order": req.order,
         "totalCode": len(code),
         "totalTests": len(tests),
+        "coverage": _coverage(model, subtree),
     }
 
 

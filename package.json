@@ -196,11 +196,6 @@
                     "name": "Trace Graph"
                 },
                 {
-                    "type": "webview",
-                    "id": "strictdoc.coverage",
-                    "name": "Coverage"
-                },
-                {
                     "id": "strictdoc.requirements",
                     "name": "Requirements"
                 }

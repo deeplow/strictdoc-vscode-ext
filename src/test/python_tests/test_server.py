@@ -91,9 +91,7 @@ def test_needs_config():
     try:
         assert_that(update["needsConfig"], is_(True))
         assert_that(ls_session.request("strictdoc/roots", {})["needsConfig"], is_(True))
-        coverage = ls_session.request("strictdoc/coverage", {})
-        assert_that(coverage["needsConfig"], is_(True))
-        assert_that(coverage.get("error"), is_(None))
+        assert_that(ls_session.request("strictdoc/roots", {}).get("error"), is_(None))
     finally:
         ls_session.__exit__(None, None, None)
 
@@ -107,7 +105,6 @@ def test_build_error(tmp_path):
         assert_that(update["error"], is_(not_none()))
         roots = ls_session.request("strictdoc/roots", {})
         assert_that(roots["error"], is_(update["error"]))
-        coverage = ls_session.request("strictdoc/coverage", {})
-        assert_that(coverage["projectDir"], is_(str(tmp_path)))
+        assert_that(roots["projectDir"], is_(str(tmp_path)))
     finally:
         ls_session.__exit__(None, None, None)

@@ -184,10 +184,34 @@ button.primary:hover:not(:disabled) {
     opacity: 0.7;
 }
 
-/* Coverage problems: a yellow ⚠, details in the tooltip. */
+/* Coverage problems: a yellow ⚠; hovering shows the coverage bars. */
 .pill.problems {
     --pill: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow));
+    position: relative;
     justify-content: center;
+}
+
+.popover {
+    display: none;
+    position: fixed; /* placed by placePopover() */
+    z-index: 10;
+    box-sizing: border-box;
+    width: 20em;
+    max-width: calc(100vw - 8px);
+    padding: 6px 8px;
+    border: 1px solid var(--vscode-editorHoverWidget-border, var(--vscode-widget-border));
+    border-radius: 3px;
+    font-size: 1.25em; /* undo the pill's 0.8em */
+    line-height: 18px;
+    white-space: normal;
+    color: var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground));
+    background: var(--vscode-editorHoverWidget-background, var(--vscode-editor-background));
+    box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.3));
+    cursor: default;
+}
+
+.pill.problems:hover .popover {
+    display: block;
 }
 
 .pill.error {
@@ -384,11 +408,7 @@ button.primary:hover:not(:disabled) {
     color: var(--vscode-strictdoc-testLink);
 }
 
-/* Requirements coverage bars (Coverage view): StrictDoc tree-map coverage. */
-.summary {
-    padding: 4px 8px 2px;
-}
-
+/* Requirements coverage bars (⚠ popover): StrictDoc tree-map coverage. */
 .coverage {
     display: grid;
     grid-template-columns: auto minmax(2em, 1fr) auto;
@@ -423,11 +443,6 @@ button.primary:hover:not(:disabled) {
 
 .coverage .num {
     font-variant-numeric: tabular-nums;
-}
-
-/* Coverage view: one requirement heading with its two bars. */
-.coverage-block {
-    margin-bottom: 4px;
 }
 
 .row.code .icon {

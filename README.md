@@ -48,7 +48,7 @@ configuration (`strictdoc_config.py` or `strictdoc.toml`), as
   submodules are skipped. Outside git, VS Code's file search is used.
 - **Several, or none**: nothing is built until you pick one with
   **StrictDoc: Select Project Configuration…** (also offered by a notification
-  and by the button in the Trace Graph and Coverage views). The choice is saved
+  and by the button in the Trace Graph view). The choice is saved
   as `strictdoc.projectPath` in the folder's `.vscode/settings.json`.
 - Set `strictdoc.projectPath` yourself to override the detection.
 
@@ -77,13 +77,12 @@ The Trace Graph shows StrictDoc's *requirements coverage with source* and *with 
 computed as in StrictDoc's tree map: a requirement is covered when it links a source file
 (a test file: path containing `tests/`), or when all its child requirements are covered.
 
-- Trace Graph rows show a yellow ⚠ pill only when under-covered; its tooltip says how many
-  requirements below still lack tests / source. The focused card shows the link counts
-  and the same ⚠.
+- Trace Graph rows show a yellow ⚠ pill only when under-covered. Hovering it shows
+  covered/total bars for source and test coverage of that requirement and everything
+  below it. The focused card shows the link counts and the same ⚠.
+- On the top-level list, a ⚠ in the toolbar shows the same bars for the whole project.
 - Toolbar toggles: **⟨⟩** shows code/test links (⟨⟩/✓ count pills on every row, CODE/TESTS
   lists in the card; off by default) and **⚠** shows or hides the coverage warnings.
-- The **Coverage** view shows covered/total bars for the whole project, for the requirement
-  focused in the Trace Graph, and for each top-level requirement (click one to focus it).
 
 ## Colours
 

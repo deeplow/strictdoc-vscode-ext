@@ -7,11 +7,13 @@
 //   focus: string[]  UIDs in focus (usually one; several when following code)
 //   nodes: [{uid, title, uri, line, doc, depth, layerTitle, statement,
 //            badges: [{kind: 'code'|'test', text, title, zero, missing, missingTitle}],
-//            parentCount, childCount, totalCode, totalTests, sections, docKey, order}]
+//            parentCount, childCount, totalCode, totalTests, sections, docKey, order,
+//            coverage: {requirements, withSource, withTests}}]
 //          `sections`: enclosing [[SECTION]] titles (outermost first) in document `docKey`;
 //          rows are grouped by them. `order` is the position in file order.
 //          code/test badges and total* count the requirement and all its descendants;
-//          `missing` is StrictDoc's tree-map coverage (requirements below still uncovered).
+//          `missing` is StrictDoc's tree-map coverage (requirements below still uncovered);
+//          `coverage` counts the covered requirements of the subtree.
 //          `depth` is the longest chain of parents (0 = top level); it picks the colour.
 //   edges: [[parentUid, childUid]]
 //   code:  [{uid, uri, begin, end, description, forward, kind: 'code'|'test', role}]  empty when hidden
@@ -53,6 +55,7 @@
     let state = { includeCode: false, showWarnings: true, history: [] };
     let list = [];
     let status = '';
+    let project; // coverage of the whole project, shown on home
     let noIndex = {}; // {needsConfig} or {error, projectDir} when the server has no index
 
     function h(tag, attrs, ...kids) {
@@ -97,16 +100,46 @@
     const pills = (n) => (n.badges || []).map(pill);
     const badge = (n, kind) => (n.badges || []).find((b) => b.kind === kind);
 
+    /** "Source coverage ▓▓▓░ 24/27 · 3 missing" (percentage when complete). */
+    function bar(label, covered, total) {
+        const pct = total ? Math.round((100 * covered) / total) : 100;
+        const missing = total - covered;
+        const track = h('span', { class: 'bar' }, h('span', { class: 'fill' }));
+        track.firstChild.style.setProperty('width', `${pct}%`); // CSSOM: the CSP forbids style=""
+        return h('div', { class: `coverage${missing ? ' partial' : ''}` },
+            h('span', { class: 'label' }, label), track,
+            h('span', { class: 'num' }, missing ? `${covered}/${total} · ${missing} missing` : `${covered}/${total} · ${pct}%`));
+    }
+
+    const underCovered = (c) => c && (c.withSource < c.requirements || c.withTests < c.requirements);
+
     /**
      * Coverage problems (StrictDoc tree map), shown only when under-covered: a yellow ⚠
-     * pill whose tooltip says how many requirements below lack tests / source.
+     * pill; hovering it shows source / test coverage bars for `c`.
      */
-    function problemsPill(n) {
-        const problems = [badge(n, 'test'), badge(n, 'code')].filter((b) => b?.missing);
-        return problems.length && state.showWarnings !== false
-            ? h('span', { class: 'pill problems', title: problems.map((b) => b.missingTitle).join('\n') }, '⚠')
-            : h('span');
+    function coveragePill(c, label = '⚠') {
+        if (!underCovered(c) || state.showWarnings === false) {
+            return h('span');
+        }
+        // title="" keeps the row's own tooltip from covering the popover.
+        return h('span', { class: 'pill problems', title: '', onmouseenter: placePopover }, label,
+            h('div', { class: 'popover' },
+                bar('Source coverage', c.withSource, c.requirements),
+                bar('Test coverage', c.withTests, c.requirements)));
     }
+    /** Keeps the (fixed) popover inside the view: below the pill, or above it near the bottom. */
+    function placePopover(e) {
+        const pill = e.currentTarget.getBoundingClientRect();
+        const pop = e.currentTarget.querySelector('.popover');
+        const { width, height } = pop.getBoundingClientRect();
+        const margin = 4;
+        const left = Math.max(margin, Math.min(pill.right - width, window.innerWidth - width - margin));
+        const below = pill.bottom; // no gap: the pointer must reach the popover without leaving the pill
+        const top = below + height <= window.innerHeight - margin ? below : Math.max(margin, pill.top - height);
+        pop.style.setProperty('left', `${left}px`); // CSSOM: the CSP forbids style=""
+        pop.style.setProperty('top', `${top}px`);
+    }
+    const problemsPill = (n) => coveragePill(n.coverage);
 
     const openReq = (n) => post({ type: 'open', uri: n.uri, line: n.line });
     const focusOn = (uid) => () => post({ type: 'focus', uid });
@@ -282,7 +315,8 @@
         back.disabled = !state.history.length;
         homeButton.disabled = !data;
         datalist.replaceChildren(...list.map((r) => h('option', { value: r.uid }, r.title)));
-        const kids = [h('div', { class: 'toolbar' }, h('span', { class: 'spacer' }),
+        const kids = [h('div', { class: 'toolbar' }, data ? null : coveragePill(project, '⚠ Project coverage'),
+            h('span', { class: 'spacer' }),
             h('button', { class: state.includeCode ? 'on' : '', title: 'Show code and test links',
                 onclick: () => post({ type: 'toggleCode' }) }, '⟨⟩'),
             h('button', { class: state.showWarnings !== false ? 'on' : '', title: 'Show coverage warnings',
@@ -305,6 +339,7 @@
         } else if (msg.type === 'home') {
             data = undefined;
             roots = msg.nodes;
+            project = msg.project;
             noIndex = msg;
             status = '';
         } else if (msg.type === 'list') {
