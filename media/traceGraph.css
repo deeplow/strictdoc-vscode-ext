@@ -355,6 +355,7 @@ button.primary:hover:not(:disabled) {
     grid-column: 1 / -1;
     grid-template-columns: subgrid;
     position: relative;
+    padding-right: 22px; /* a free slot for ↗, so it never covers the chips */
 }
 
 /* The count is a touch smaller than the icon. */
@@ -373,7 +374,7 @@ button.primary:hover:not(:disabled) {
     overflow: hidden; /* first to give way on narrow sidebars */
 }
 
-/* ↗ takes no column: it floats over the row's end on hover. */
+/* ↗ takes no column: it shows on hover in the slot the row's padding leaves free. */
 .rows .open {
     position: absolute;
     right: 2px;
