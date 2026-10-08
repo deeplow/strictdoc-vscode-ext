@@ -4,6 +4,10 @@ A VS Code extension for [StrictDoc](https://strictdoc.readthedocs.io) projects.
 It traces requirements (`.sdoc`) **down** to code and code (`@relation(...)`
 markers) **up** to requirements, using StrictDoc's own Python API.
 
+| Trace Graph | Requirements | CodeLens in `.sdoc` |
+| :---: | :---: | :---: |
+| <img src="media/strictdoc-ext-1.png" alt="Trace Graph: a focused requirement card with its children, grouped by section" width="260"> | <img src="media/strictdoc-ext-2.png" alt="Requirements view: requirements by document" width="260"> | <img src="media/strictdoc-ext-3.png" alt="CodeLens with parent, child, code and test counts above a requirement" width="260"> |
+
 ## Features
 
 - **Trace Graph** view: the top-level requirements, and for a focused requirement a card

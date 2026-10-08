@@ -50,7 +50,7 @@
         "lint": "eslint src",
         "format-check": "prettier --check 'src/**/*.ts' 'build/**/*.yml' '.github/**/*.yml'",
         "test": "node ./out/test/runTest.js",
-        "vsce-package": "vsce package --allow-missing-repository -o strictdoc-trace.vsix"
+        "vsce-package": "vsce package --allow-missing-repository --no-rewrite-relative-links -o strictdoc-trace.vsix"
     },
     "contributes": {
         "configuration": {
